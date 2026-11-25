@@ -80,6 +80,8 @@ API_ACTIONS = {
 STATS_PAGE_SIZE = 1000
 STATS_MAX_PAGES = 20
 STATS_CACHE_TTL = int(os.getenv("STATS_CACHE_TTL", "30"))
+STATS_WINDOW_HOURS = int(os.getenv("STATS_WINDOW_HOURS", "24"))
+STATS_TOP = int(os.getenv("STATS_TOP", "10"))
 
 _stats_cache = {"at": 0.0, "data": None}
 
@@ -514,69 +516,18 @@ async def collect_stats(window_hours: int, top: int):
     }
 
 
-@app.get("/api/v2/admin/stats")
-async def admin_stats(request: Request):
-    """管理统计：执行成功率、进行中、待处理等"""
-
-    principal = authenticate(request)
-
-    if principal is None:
-        raise HTTPException(
-            status_code=401,
-            detail="Unauthorized",
-            headers={
-                "WWW-Authenticate": 'Basic realm="MCP Gateway"'
-            },
-        )
-
-    if not await cerbos_allow(
-        principal, "admin/stats", "read", kind="kestra-api", ip=client_ip(request)
-    ):
-        raise HTTPException(
-            status_code=403,
-            detail="Forbidden",
-        )
-
-    try:
-        hours = int(request.query_params.get("hours", "24"))
-    except Exception:
-        hours = 24
-
-    try:
-        top = int(request.query_params.get("top", "10"))
-    except Exception:
-        top = 10
-
-    hours = max(1, min(hours, 24 * 30))
-    top = max(1, min(top, 50))
-
-    try:
-        return await collect_stats(hours, top)
-
-    except Exception:
-        raise HTTPException(
-            status_code=502,
-            detail="Backend unavailable",
-        )
-
-
 @app.get("/api/v2/health")
 async def health():
-    """网关自身 + 后端 Kestra 的健康检查"""
+    """网关自身 + 后端 Kestra 的健康检查与执行统计"""
 
-    backend = {"status": "ok", "url": BACKEND}
+    backend = {"status": "ok"}
 
     started = time.perf_counter()
-
-    headers = {"X-Kestra-Tenant": KESTRA_TENANT}
-
-    if BACKEND_AUTH:
-        headers["Authorization"] = "Basic " + BACKEND_AUTH
 
     try:
         response = await client.get(
             f"{BACKEND}/api/v1/namespaces/search",
-            headers=headers,
+            headers=backend_headers(),
             timeout=httpx.Timeout(5.0, connect=3.0),
         )
         backend["code"] = response.status_code
@@ -589,6 +540,19 @@ async def health():
         backend["detail"] = type(exc).__name__
 
     backend["latency_ms"] = round((time.perf_counter() - started) * 1000, 1)
+
+    # 后端执行统计（带缓存）
+    try:
+        stats = await collect_stats(STATS_WINDOW_HOURS, STATS_TOP)
+
+        backend["window"] = stats["window"]
+        backend["executions"] = stats["executions"]
+        backend["by_namespace"] = stats["by_namespace"]
+        backend["top_flows"] = stats["top_flows"]
+        backend["hourly"] = stats["hourly"]
+
+    except Exception as exc:
+        backend.setdefault("detail", type(exc).__name__)
 
     healthy = backend["status"] == "ok"
 

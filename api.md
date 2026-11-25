@@ -12,8 +12,7 @@
 
 | 接口 | 说明 |
 |---|---|
-| `GET /api/v2/health` | 健康检查（含后端 Kestra 连通性），无需认证 |
-| `GET /api/v2/admin/stats` | 执行统计（成功率、进行中、待处理、按 flow/命名空间/小时分布），需认证 |
+| `GET /api/v2/health` | 健康检查（含后端 Kestra 连通性与执行统计），无需认证 |
 | `ANY /api/v2/main/mcp/{账号}` | MCP 端点，`{账号}` 为 MCP Server 名（账号） |
 | `ANY /api/v2/main/mcp/{账号}/{其余路径}` | MCP 附加路径 |
 | `ANY /api/v2/{其余路径}` | Kestra 管理 API（flows / namespaces / executions 等） |
@@ -134,9 +133,7 @@ curl -s -u "$AUTH" -X DELETE "$BASE/flows/main/u199013_daily"            # 删
 
 ---
 
-## 5. 健康检查与统计
-
-### 5.1 健康检查
+## 5. 健康检查（含后端执行统计）
 
 ```bash
 curl -s https://kestra.feg.cn/api/v2/health
@@ -145,43 +142,26 @@ curl -s https://kestra.feg.cn/api/v2/health
 ```json
 {
   "status": "ok",
-  "backend": {"status": "ok", "url": "http://10.17.1.201:38080", "code": 200, "latency_ms": 12.4}
+  "backend": {
+    "status": "ok",
+    "code": 200,
+    "latency_ms": 12.4,
+    "window": {"hours": 24, "from": "...", "to": "..."},
+    "executions": {
+      "window":   {"total": 2227, "success": 2222, "failed": 1, "running": 0, "pending": 0, "paused": 0, "other": 4, "finished": 2223, "success_ratio": 0.9996},
+      "all_time": {"total": 4809, "success": 4796, "failed": 6, "running": 0, "pending": 0, "paused": 0, "other": 7, "finished": 4802, "success_ratio": 0.9988},
+      "all_time_total": 4809
+    },
+    "by_namespace": {"main": {"total": 1982, "success": 1969, "failed": 6, "success_ratio": 0.997}},
+    "top_flows": [{"namespace": "main", "flow_id": "oauth2_ip_dag", "total": 1814, "success": 1814, "failed": 0, "success_ratio": 1.0, "last_run": "..."}],
+    "hourly": {"11-25 23:00": {"total": 15, "success": 15, "failed": 0, "success_ratio": 1.0}}
+  }
 }
 ```
 
-后端不可达时返回 HTTP 503，`status` 变为 `degraded`，并带 `detail`（异常类型）。
-
-### 5.2 执行统计
-
-```bash
-curl -s -u 'u199013:w199013' 'https://kestra.feg.cn/api/v2/admin/stats?hours=24&top=10'
-```
-
-| 参数 | 默认 | 说明 |
-|---|---|---|
-| `hours` | 24 | 统计窗口（小时），上限 30 天 |
-| `top` | 10 | 返回的 flow 数量上限 |
-
-返回内容：
-
-```json
-{
-  "generated_at": "2026-11-25T23:14:59+00:00",
-  "window": {"hours": 24, "from": "...", "to": "..."},
-  "executions": {
-    "window":   {"total": 2227, "success": 2222, "failed": 1, "running": 0, "pending": 0, "paused": 0, "other": 4, "finished": 2223, "success_ratio": 0.9996},
-    "all_time": {"total": 4809, "success": 4796, "failed": 6, "running": 0, "pending": 0, "paused": 0, "other": 7, "finished": 4802, "success_ratio": 0.9988},
-    "all_time_total": 4809
-  },
-  "by_namespace": {"main": {"total": 1982, "success": 1969, "failed": 6, "success_ratio": 0.997}},
-  "top_flows": [{"namespace": "main", "flow_id": "oauth2_ip_dag", "total": 1814, "success": 1814, "failed": 0, "success_ratio": 1.0, "last_run": "..."}],
-  "hourly": {"11-25 23:00": {"total": 15, "success": 15, "failed": 0, "success_ratio": 1.0}}
-}
-```
-
-状态口径：`success` = SUCCESS，`failed` = FAILED，`running` = RUNNING（进行中），`pending` = CREATED（待处理），`paused` = PAUSED；`success_ratio` = success / (success + failed)。
-
-> 统计结果缓存 30 秒，连续请求不会重复拉取后端全量执行记录。
+- 后端不可达时返回 HTTP 503，`status` 变为 `degraded`，并带 `detail`（异常类型）
+- 状态口径：`success` = SUCCESS，`failed` = FAILED，`running` = RUNNING（进行中），`pending` = CREATED（待处理），`paused` = PAUSED；`success_ratio` = success / (success + failed)
+- 统计默认取过去 24 小时（`window.hours`），结果缓存 30 秒
 
 ---
 
