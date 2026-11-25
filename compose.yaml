@@ -12,7 +12,7 @@ services:
       BACKEND_URL: "http://10.17.1.201:38080"
 
       # 后端原有 Basic Auth（Base64）
-      KESTRA_BASIC_AUTH: "d3UuemhpcGluZ0BmZWcuY246UEBzc3dwcmQxMTA="
+      KESTRA_BASIC_AUTH: "d3UuemhpcGluZ0BmZWcuY246UEBzc3cwcmQxMTA="
 
       # Gateway 默认账号
       GATEWAY_USER: "u041007"
