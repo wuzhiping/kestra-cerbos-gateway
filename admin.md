@@ -27,7 +27,7 @@
 curl -u 'u199013:w199013' https://kestra.feg.cn/api/v2/flows/main
 ```
 
-- 账号密码由管理员分配（配置项 `GATEWAY_USERS`，格式 `账号:密码,账号:密码`）
+- 账号密码由管理员分配（`GATEWAY_USERS`，格式 `账号:密码,账号:密码`）
 - 未分配的账号、密码错误、缺少 `Authorization` 头 → `401 {"detail":"Unauthorized"}`
 
 ---
@@ -143,21 +143,3 @@ curl -s -u "$AUTH" -X DELETE "$BASE/flows/main/u199013_daily"            # 删
 | 403 | `{"detail":"Flow id must be prefixed with '<账号>_'"}` | flow id 不属于当前账号 |
 | 404 | `{"detail":"Not Found"}` | 网关没有该接口（例如 `/health`、`/api/v1/*`） |
 | 其它 | Kestra 原始响应 | 上游返回的状态码与响应体原样返回 |
-
----
-
-## 6. 管理员
-
-### 6.1 配置项
-
-| 配置项 | 说明 |
-|---|---|
-| `GATEWAY_USERS` | 各账号密码，格式 `账号:密码,账号:密码`；未列出的账号无法登录 |
-| `KESTRA_BASIC_AUTH` | 网关访问 Kestra 后端所用凭证（Base64 的 `账号:密码`） |
-
-### 6.2 部署
-
-```bash
-git pull && docker compose up -d --build
-docker compose ps      # 健康检查走 /api/v2/health
-```
