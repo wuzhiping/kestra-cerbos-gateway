@@ -56,8 +56,8 @@ if not GATEWAY_USERS and GATEWAY_USER:
 # Cerbos PDP 地址
 CERBOS_URL = os.getenv("CERBOS_URL", "").rstrip("/")
 
-# Kestra 租户（管理 API 需要）
-KESTRA_TENANT = os.getenv("KESTRA_TENANT", "main")
+# Kestra 租户（写死 main，OSS 单租户）
+KESTRA_TENANT = "main"
 
 # 受保护账号（需要 Cerbos 额外授权）
 PROTECTED_TARGETS = {"u041007", "u199013"}
