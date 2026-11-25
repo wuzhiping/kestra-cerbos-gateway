@@ -3,11 +3,14 @@ import base64
 import json
 import re
 import secrets
+import time
+from collections import Counter, defaultdict
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 import httpx
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 BACKEND = os.getenv("BACKEND_URL", "http://10.17.1.201:38080")
@@ -73,6 +76,13 @@ API_ACTIONS = {
     "DELETE": "delete",
 }
 
+# 统计：执行记录拉取与缓存
+STATS_PAGE_SIZE = 1000
+STATS_MAX_PAGES = 20
+STATS_CACHE_TTL = int(os.getenv("STATS_CACHE_TTL", "30"))
+
+_stats_cache = {"at": 0.0, "data": None}
+
 app = FastAPI(title="MCP PDP Gateway")
 
 client = httpx.AsyncClient(
@@ -113,24 +123,54 @@ def authenticate(request: Request):
     return account
 
 
+def client_ip(request: Request):
+    """取访问者来源 IP：X-Forwarded-For 首跳 -> X-Real-IP -> TCP 对端地址
+
+    注意：X-Forwarded-For 可被客户端伪造，必须由可信反向代理覆盖该头，
+    否则策略里的来源 IP 判断不可信。
+    """
+
+    forwarded = request.headers.get("x-forwarded-for")
+
+    if forwarded:
+        first = forwarded.split(",")[0].strip()
+
+        if first:
+            return first
+
+    real_ip = request.headers.get("x-real-ip")
+
+    if real_ip:
+        return real_ip.strip()
+
+    return request.client.host if request.client else None
+
+
 async def cerbos_allow(
     principal_id: str,
     resource_id: str,
     action: str,
     kind: str = "kestra-mcp",
+    ip: str = None,
 ) -> bool:
     """调用 Cerbos PDP，判断 principal 是否有权对资源执行 action"""
 
     if not CERBOS_URL:
         return False
 
+    principal = {
+        "id": principal_id,
+        "roles": ["user"],
+        "policyVersion": "default",
+    }
+
+    # 来源 IP 作为可选属性传给策略
+    if ip:
+        principal["attr"] = {"ip": ip}
+
     payload = {
         "requestId": f"{principal_id}-{kind}-{resource_id}",
-        "principal": {
-            "id": principal_id,
-            "roles": ["user"],
-            "policyVersion": "default",
-        },
+        "principal": principal,
         "resources": [
             {
                 "resource": {"kind": kind, "id": resource_id},
@@ -310,9 +350,255 @@ async def proxy_to_backend(request: Request, path: str) -> StreamingResponse:
     )
 
 
+def backend_headers():
+    """访问 Kestra 后端所需请求头"""
+
+    headers = {"X-Kestra-Tenant": KESTRA_TENANT}
+
+    if BACKEND_AUTH:
+        headers["Authorization"] = "Basic " + BACKEND_AUTH
+
+    return headers
+
+
+async def fetch_executions():
+    """拉取后端执行记录（该 Kestra 版本不支持服务端过滤，客户端自行统计）"""
+
+    headers = backend_headers()
+
+    results = []
+    total = 0
+
+    for page in range(1, STATS_MAX_PAGES + 1):
+        response = await client.get(
+            f"{BACKEND}/api/v1/executions/search",
+            params={"size": STATS_PAGE_SIZE, "page": page},
+            headers=headers,
+            timeout=httpx.Timeout(30.0, connect=5.0),
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        batch = data.get("results") or []
+
+        results.extend(batch)
+        total = data.get("total", total)
+
+        if not batch or len(results) >= total:
+            break
+
+    return results, total
+
+
+def parse_datetime(value):
+    if not value:
+        return None
+
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+    except Exception:
+        return None
+
+
+def summarize(states):
+    """按状态汇总"""
+
+    success = states.get("SUCCESS", 0)
+    failed = states.get("FAILED", 0)
+    running = states.get("RUNNING", 0)
+    pending = states.get("CREATED", 0)
+    paused = states.get("PAUSED", 0)
+
+    finished = success + failed
+
+    return {
+        "total": sum(states.values()),
+        "success": success,
+        "failed": failed,
+        "running": running,
+        "pending": pending,
+        "paused": paused,
+        "other": sum(states.values()) - success - failed - running - pending - paused,
+        "finished": finished,
+        "success_ratio": round(success / finished, 4) if finished else None,
+    }
+
+
+async def collect_stats(window_hours: int, top: int):
+    """统计执行情况（带缓存，避免频繁拉取全量执行记录）"""
+
+    now = time.time()
+
+    if _stats_cache["data"] and now - _stats_cache["at"] < STATS_CACHE_TTL:
+        executions, total, fetched_at = _stats_cache["data"]
+
+    else:
+        started = time.perf_counter()
+        executions, total = await fetch_executions()
+        fetched_at = {
+            "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+            "records": len(executions),
+        }
+        _stats_cache["at"] = now
+        _stats_cache["data"] = (executions, total, fetched_at)
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
+
+    all_states = Counter()
+    window_states = Counter()
+    by_namespace = defaultdict(Counter)
+    by_flow = defaultdict(Counter)
+    last_run = {}
+    hourly = defaultdict(Counter)
+
+    for execution in executions:
+        state = execution.get("state") or {}
+        current = state.get("current") or "UNKNOWN"
+        namespace = execution.get("namespace")
+        flow_id = execution.get("flowId")
+
+        all_states[current] += 1
+        by_namespace[namespace][current] += 1
+        by_flow[(namespace, flow_id)][current] += 1
+
+        started_at = parse_datetime(state.get("startDate"))
+
+        if started_at is None:
+            histories = state.get("histories") or []
+            started_at = parse_datetime(histories[0].get("date")) if histories else None
+
+        if started_at is None:
+            continue
+
+        key = (namespace, flow_id)
+
+        if started_at.isoformat() > last_run.get(key, ""):
+            last_run[key] = started_at.isoformat()
+
+        if started_at >= cutoff:
+            window_states[current] += 1
+            hourly[started_at.strftime("%m-%d %H:00")][current] += 1
+
+    flows = []
+
+    for (namespace, flow_id), states in by_flow.items():
+        item = summarize(states)
+        item["namespace"] = namespace
+        item["flow_id"] = flow_id
+        item["last_run"] = last_run.get((namespace, flow_id))
+        flows.append(item)
+
+    flows.sort(key=lambda item: (item["total"], item["last_run"] or ""), reverse=True)
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "window": {
+            "hours": window_hours,
+            "from": cutoff.isoformat(),
+            "to": datetime.now(timezone.utc).isoformat(),
+        },
+        "executions": {
+            "window": summarize(window_states),
+            "all_time": summarize(all_states),
+            "all_time_total": total,
+        },
+        "by_namespace": {
+            namespace: summarize(states) for namespace, states in by_namespace.items()
+        },
+        "top_flows": flows[:top],
+        "hourly": {
+            bucket: summarize(states) for bucket, states in sorted(hourly.items())
+        },
+        "fetch": fetched_at,
+    }
+
+
+@app.get("/api/v2/admin/stats")
+async def admin_stats(request: Request):
+    """管理统计：执行成功率、进行中、待处理等"""
+
+    principal = authenticate(request)
+
+    if principal is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized",
+            headers={
+                "WWW-Authenticate": 'Basic realm="MCP Gateway"'
+            },
+        )
+
+    if not await cerbos_allow(
+        principal, "admin/stats", "read", kind="kestra-api", ip=client_ip(request)
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden",
+        )
+
+    try:
+        hours = int(request.query_params.get("hours", "24"))
+    except Exception:
+        hours = 24
+
+    try:
+        top = int(request.query_params.get("top", "10"))
+    except Exception:
+        top = 10
+
+    hours = max(1, min(hours, 24 * 30))
+    top = max(1, min(top, 50))
+
+    try:
+        return await collect_stats(hours, top)
+
+    except Exception:
+        raise HTTPException(
+            status_code=502,
+            detail="Backend unavailable",
+        )
+
+
 @app.get("/api/v2/health")
 async def health():
-    return {"status": "ok"}
+    """网关自身 + 后端 Kestra 的健康检查"""
+
+    backend = {"status": "ok", "url": BACKEND}
+
+    started = time.perf_counter()
+
+    headers = {"X-Kestra-Tenant": KESTRA_TENANT}
+
+    if BACKEND_AUTH:
+        headers["Authorization"] = "Basic " + BACKEND_AUTH
+
+    try:
+        response = await client.get(
+            f"{BACKEND}/api/v1/namespaces/search",
+            headers=headers,
+            timeout=httpx.Timeout(5.0, connect=3.0),
+        )
+        backend["code"] = response.status_code
+
+        if response.status_code != 200:
+            backend["status"] = "error"
+
+    except Exception as exc:
+        backend["status"] = "error"
+        backend["detail"] = type(exc).__name__
+
+    backend["latency_ms"] = round((time.perf_counter() - started) * 1000, 1)
+
+    healthy = backend["status"] == "ok"
+
+    return JSONResponse(
+        status_code=200 if healthy else 503,
+        content={
+            "status": "ok" if healthy else "degraded",
+            "backend": backend,
+        },
+    )
 
 
 @app.api_route(
@@ -341,7 +627,9 @@ async def gateway(request: Request, target: str, rest: str = ""):
                 },
             )
 
-        if not await cerbos_allow(principal, target, "access"):
+        if not await cerbos_allow(
+            principal, target, "access", ip=client_ip(request)
+        ):
             raise HTTPException(
                 status_code=403,
                 detail="Forbidden",
@@ -382,7 +670,9 @@ async def kestra_api(request: Request, rest: str):
 
     action = API_ACTIONS.get(request.method.upper(), "read")
 
-    if not await cerbos_allow(principal, rest, action, kind="kestra-api"):
+    if not await cerbos_allow(
+        principal, rest, action, kind="kestra-api", ip=client_ip(request)
+    ):
         raise HTTPException(
             status_code=403,
             detail="Forbidden",
