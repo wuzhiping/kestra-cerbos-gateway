@@ -1018,9 +1018,12 @@ async def health(request: Request):
         "backend": backend,
     }
 
-    accept = request.headers.get("accept", "")
+    output_format = (request.query_params.get("format") or "").lower()
 
-    if "text/html" in accept and "application/json" not in accept:
+    # 默认返回仪表盘 HTML，?format=json 返回 JSON
+    wants_html = output_format != "json"
+
+    if wants_html:
         page = render_dashboard(
             {
                 **payload,

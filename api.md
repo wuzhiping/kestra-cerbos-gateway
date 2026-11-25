@@ -12,7 +12,7 @@
 
 | 介面 | 說明 |
 |---|---|
-| `GET /api/v2/health` | 健康檢查：瀏覽器回傳執行狀態儀表板，腳本回傳 JSON（含後端連通性與執行統計） |
+| `GET /api/v2/health` | 健康檢查：預設回傳執行狀態儀表板（HTML），加 `?format=json` 回傳 JSON（含後端連通性與執行統計） |
 | `ANY /api/v2/main/mcp/{帳號}` | MCP 端點，`{帳號}` 為 MCP Server 名（帳號） |
 | `ANY /api/v2/main/mcp/{帳號}/{其餘路徑}` | MCP 附加路徑 |
 | `ANY /api/v2/{其餘路徑}` | Kestra 管理 API（flows / namespaces / executions 等） |
@@ -135,10 +135,12 @@ curl -s -u "$AUTH" -X DELETE "$BASE/flows/main/u199013_daily"            # 刪
 
 ## 5. 健康檢查（含後端執行統計）
 
-瀏覽器直接開啟 `https://kestra.feg.cn/api/v2/health` 會看到執行狀態儀表板（12 張指標卡、成功率環圖、狀態分布、每小時趨勢、命名空間與 Top Flows 表格；命名空間、Flow 名稱與時間已遮罩，每 5 分鐘自動重新整理）；腳本 / curl 存取同一路徑則回傳 JSON。
+瀏覽器直接開啟 `https://kestra.feg.cn/api/v2/health` 會看到執行狀態儀表板（12 張指標卡、成功率環圖、狀態分布、每小時趨勢、命名空間與 Top Flows 表格；命名空間、Flow 名稱與時間已遮罩，每 5 分鐘自動重新整理）。
+
+腳本 / curl 取 JSON 時加 `?format=json`：
 
 ```bash
-curl -s https://kestra.feg.cn/api/v2/health
+curl -s 'https://kestra.feg.cn/api/v2/health?format=json'
 ```
 
 ```json
