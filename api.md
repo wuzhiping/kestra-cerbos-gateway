@@ -135,7 +135,7 @@ curl -s -u "$AUTH" -X DELETE "$BASE/flows/main/u199013_daily"            # 刪
 
 ## 5. 健康檢查（含後端執行統計）
 
-瀏覽器直接開啟 `https://kestra.feg.cn/api/v2/health` 會看到執行狀態儀表板（24 小時執行數、成功率、失敗/進行中/待處理、每小時趨勢、按命名空間與 Top Flows 表格，每 30 秒自動重新整理）；腳本 / curl 存取同一路徑則回傳 JSON。
+瀏覽器直接開啟 `https://kestra.feg.cn/api/v2/health` 會看到執行狀態儀表板（12 張指標卡、成功率環圖、狀態分布、每小時趨勢、命名空間與 Top Flows 表格；命名空間、Flow 名稱與時間已遮罩，每 5 分鐘自動重新整理）；腳本 / curl 存取同一路徑則回傳 JSON。
 
 ```bash
 curl -s https://kestra.feg.cn/api/v2/health
@@ -156,7 +156,9 @@ curl -s https://kestra.feg.cn/api/v2/health
     },
     "by_namespace": {"main": {"total": 1982, "success": 1969, "failed": 6, "success_ratio": 0.997}},
     "top_flows": [{"namespace": "main", "flow_id": "oauth2_ip_dag", "total": 1814, "success": 1814, "failed": 0, "success_ratio": 1.0, "last_run": "..."}],
-    "hourly": {"11-25 23:00": {"total": 15, "success": 15, "failed": 0, "success_ratio": 1.0}}
+    "hourly": {"11-25 23:00": {"total": 15, "success": 15, "failed": 0, "success_ratio": 1.0}},
+    "flows": {"total": 19, "listed": 19, "by_namespace": {"tutorial": 10, "main": 7, "company.team": 2}},
+    "summary": {"active_flows": 7, "rate_per_minute": 1.53, "avg_duration_s": 0.524, "p50_duration_s": 0.513, "p95_duration_s": 0.641, "max_duration_s": 1.159}
   }
 }
 ```
