@@ -630,7 +630,10 @@ header p{color:#c6d8f5;margin:5px 0 0;font-size:13px}
 .badge.bad{background:rgba(229,72,77,.28);border-color:rgba(255,180,180,.5)}
 
 main{max-width:1500px;margin:22px auto;padding:0 18px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:13px}
+.cards{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:13px}
+@media (max-width:1280px){.cards{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media (max-width:900px){.cards{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:640px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .card{position:relative;overflow:hidden;background:#fff;border:1px solid var(--line);border-radius:14px;padding:15px 16px;
   box-shadow:0 2px 8px rgba(20,40,80,.05);opacity:0;transform:translateY(14px);animation:rise .5s ease forwards}
 @keyframes rise{to{opacity:1;transform:none}}
@@ -643,7 +646,7 @@ main{max-width:1500px;margin:22px auto;padding:0 18px}
 .card.green{--accent:var(--green)}.card.amber{--accent:var(--amber)}.card.rose{--accent:var(--rose)}
 .card.cyan{--accent:var(--cyan)}
 
-.panel{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:16px;
+.panel{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:16px;overflow:hidden;
   box-shadow:0 2px 8px rgba(20,40,80,.05)}
 .panel h2{margin:0 0 12px;font-size:15px;color:#22304d;display:flex;align-items:center;gap:8px}
 .panel h2 i{width:8px;height:16px;border-radius:4px;background:linear-gradient(180deg,var(--blue),var(--violet));display:inline-block}
@@ -673,9 +676,9 @@ main{max-width:1500px;margin:22px auto;padding:0 18px}
 .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
 
-.chart{display:flex;align-items:flex-end;gap:5px;height:168px;padding:10px 2px 0}
-.chart .col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;height:100%;cursor:default}
-.chart .stack{width:100%;display:flex;flex-direction:column;justify-content:flex-end;height:100%;
+.chart{display:flex;align-items:flex-end;gap:4px;height:168px;padding:10px 2px 0;overflow:hidden;width:100%}
+.chart .col{flex:1 1 0;min-width:0;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;height:100%;cursor:default;overflow:visible}
+.chart .stack{width:100%;max-width:26px;display:flex;flex-direction:column;justify-content:flex-end;height:100%;
   transform-origin:bottom;transform:scaleY(0);animation:grow .7s cubic-bezier(.2,.8,.2,1) forwards}
 @keyframes grow{to{transform:scaleY(1)}}
 .chart .seg{width:100%}
@@ -683,14 +686,25 @@ main{max-width:1500px;margin:22px auto;padding:0 18px}
 .chart .seg.bad{background:linear-gradient(180deg,#f47874,#e5484d)}
 .chart .seg.other{background:linear-gradient(180deg,#d7dfec,#aab6c8)}
 .chart .col:hover .stack{filter:brightness(1.08) saturate(1.2)}
-.chart small{font-size:10px;color:#8b96a8;white-space:nowrap;transform:rotate(-38deg);transform-origin:right center;height:16px}
+.chart small{font-size:9.5px;color:#8b96a8;white-space:nowrap;transform:rotate(-38deg);transform-origin:right center;height:16px;max-width:100%;overflow:hidden;text-overflow:clip}
 
-table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{text-align:left;padding:8px;border-bottom:1px solid #eef1f7;white-space:nowrap}
-th{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.5px}
-tbody tr{transition:background .15s ease}
-tbody tr:hover{background:#f7f9ff}
+.tablewrap{max-height:360px;overflow:auto;border:1px solid var(--line);border-radius:10px;background:#fff}
+.tablewrap::-webkit-scrollbar{width:6px;height:6px}
+.tablewrap::-webkit-scrollbar-thumb{background:#cdd7e8;border-radius:4px}
+table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+th,td{text-align:left;padding:9px 11px;white-space:nowrap}
+thead th{position:sticky;top:0;z-index:1;color:#5c6a83;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.7px;
+  background:linear-gradient(180deg,#f8fafd,#eef2f9);border-bottom:1px solid #dde4f0}
+tbody td{border-bottom:1px solid #eff2f8;color:#3a4761}
+tbody tr:nth-child(odd){background:#f9fbfe}
+tbody tr:nth-child(even){background:#fff}
+tbody tr{transition:background .16s ease,box-shadow .16s ease}
+tbody tr:hover{background:#eaf1ff}
+tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
+tbody tr:last-child td{border-bottom:none}
 td.num{text-align:right;font-variant-numeric:tabular-nums}
+td.num:first-child{text-align:left}
+tbody td:first-child{font-weight:600;color:#2c3a56}
 .bar{height:8px;border-radius:5px;background:#eef1f7;overflow:hidden;min-width:110px}
 .bar i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,#34c98a,#1fa971);
   width:0;transition:width .9s cubic-bezier(.2,.8,.2,1)}
@@ -786,7 +800,7 @@ def render_dashboard(data):
 
     cards = [
         ("blue", "24 小時執行", window.get("total", 0), "視窗內執行總數", 0),
-        ("green", "成功率", format_ratio(window.get("success_ratio")), "success / (success + failed)", None),
+        ("green", "成功率", format_ratio(window.get("success_ratio")), "成功 ÷ 失敗", None),
         ("rose", "失敗", window.get("failed", 0), "FAILED", 0),
         ("cyan", "進行中", window.get("running", 0), "RUNNING", 0),
         ("amber", "待處理", window.get("pending", 0), "CREATED", 0),
@@ -920,10 +934,10 @@ def render_dashboard(data):
         '<span><i style="background:#e5484d"></i>失敗</span>'
         '<span><i style="background:#aab6c8"></i>其它</span></div></div></div>'
         '<div class="grid2">'
-        '<div class="panel"><h2><i></i>按命名空間</h2><table><thead><tr><th>命名空間</th>'
+        '<div class="panel"><h2><i></i>按命名空間</h2><div class="tablewrap"><table><thead><tr><th>命名空間</th>'
         '<th class="num">總數</th><th class="num">成功</th><th class="num">失敗</th>'
-        '<th class="num">成功率</th><th>佔比</th></tr></thead><tbody>__NS_ROWS__</tbody></table></div>'
-        '<div class="panel"><h2><i></i>Top Flows</h2><table><thead><tr><th>命名空間</th><th>Flow</th>'
+        '<th class="num">成功率</th><th>佔比</th></tr></thead><tbody>__NS_ROWS__</tbody></table></div></div>'
+        '<div class="panel"><h2><i></i>Top Flows</h2><div class="tablewrap"><table><thead><tr><th>命名空間</th><th>Flow</th>'
         '<th class="num">總數</th><th class="num">成功</th><th class="num">失敗</th>'
         '<th class="num">成功率</th><th class="num">最後執行</th></tr></thead>'
         "<tbody>__FLOW_ROWS__</tbody></table></div></div></main>"
