@@ -12,7 +12,7 @@
 
 | 接口 | 说明 |
 |---|---|
-| `GET /api/v2/health` | 健康检查（含后端 Kestra 连通性与执行统计），无需认证 |
+| `GET /api/v2/health` | 健康检查：浏览器返回运行状态仪表盘，脚本返回 JSON（含后端连通性与执行统计） |
 | `ANY /api/v2/main/mcp/{账号}` | MCP 端点，`{账号}` 为 MCP Server 名（账号） |
 | `ANY /api/v2/main/mcp/{账号}/{其余路径}` | MCP 附加路径 |
 | `ANY /api/v2/{其余路径}` | Kestra 管理 API（flows / namespaces / executions 等） |
@@ -134,6 +134,8 @@ curl -s -u "$AUTH" -X DELETE "$BASE/flows/main/u199013_daily"            # 删
 ---
 
 ## 5. 健康检查（含后端执行统计）
+
+浏览器直接打开 `https://kestra.feg.cn/api/v2/health` 会看到一个运行状态仪表盘（24 小时执行数、成功率、失败/进行中/待处理、每小时趋势、按命名空间与 Top Flows 表格，每 30 秒自动刷新）；脚本 / curl 访问同一路径则返回 JSON。
 
 ```bash
 curl -s https://kestra.feg.cn/api/v2/health

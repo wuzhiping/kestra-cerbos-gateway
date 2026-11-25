@@ -1,5 +1,6 @@
 import os
 import base64
+import html
 import json
 import re
 import secrets
@@ -10,7 +11,7 @@ from urllib.parse import urlencode
 
 import httpx
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 BACKEND = os.getenv("BACKEND_URL", "http://10.17.1.201:38080")
@@ -392,6 +393,35 @@ async def fetch_executions():
     return results, total
 
 
+async def fetch_flows():
+    """拉取 flow 清单统计（总数与按命名空间分布）"""
+
+    try:
+        response = await client.get(
+            f"{BACKEND}/api/v1/flows/search",
+            params={"size": 500},
+            headers=backend_headers(),
+            timeout=httpx.Timeout(15.0, connect=5.0),
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        results = data.get("results") or []
+
+        by_namespace = Counter(
+            item.get("namespace") for item in results if item.get("namespace")
+        )
+
+        return {
+            "total": data.get("total", len(results)),
+            "listed": len(results),
+            "by_namespace": dict(by_namespace),
+        }
+
+    except Exception:
+        return {"total": None, "listed": 0, "by_namespace": {}}
+
+
 def parse_datetime(value):
     if not value:
         return None
@@ -433,17 +463,18 @@ async def collect_stats(window_hours: int, top: int):
     now = time.time()
 
     if _stats_cache["data"] and now - _stats_cache["at"] < STATS_CACHE_TTL:
-        executions, total, fetched_at = _stats_cache["data"]
+        executions, total, fetched_at, flow_inventory = _stats_cache["data"]
 
     else:
         started = time.perf_counter()
         executions, total = await fetch_executions()
+        flow_inventory = await fetch_flows()
         fetched_at = {
             "latency_ms": round((time.perf_counter() - started) * 1000, 1),
             "records": len(executions),
         }
         _stats_cache["at"] = now
-        _stats_cache["data"] = (executions, total, fetched_at)
+        _stats_cache["data"] = (executions, total, fetched_at, flow_inventory)
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
 
@@ -482,16 +513,16 @@ async def collect_stats(window_hours: int, top: int):
             window_states[current] += 1
             hourly[started_at.strftime("%m-%d %H:00")][current] += 1
 
-    flows = []
+    flow_stats = []
 
     for (namespace, flow_id), states in by_flow.items():
         item = summarize(states)
         item["namespace"] = namespace
         item["flow_id"] = flow_id
         item["last_run"] = last_run.get((namespace, flow_id))
-        flows.append(item)
+        flow_stats.append(item)
 
-    flows.sort(key=lambda item: (item["total"], item["last_run"] or ""), reverse=True)
+    flow_stats.sort(key=lambda item: (item["total"], item["last_run"] or ""), reverse=True)
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -508,17 +539,193 @@ async def collect_stats(window_hours: int, top: int):
         "by_namespace": {
             namespace: summarize(states) for namespace, states in by_namespace.items()
         },
-        "top_flows": flows[:top],
+        "top_flows": flow_stats[:top],
         "hourly": {
             bucket: summarize(states) for bucket, states in sorted(hourly.items())
         },
+        "flow_inventory": flow_inventory,
         "fetch": fetched_at,
     }
 
 
+DASHBOARD_CSS = """
+*{box-sizing:border-box;scrollbar-width:thin}
+body{margin:0;background:#f3f5f9;color:#172033;font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{position:sticky;top:0;z-index:30;background:linear-gradient(100deg,#0e2340 0%,#1a3a6d 58%,#24518f 100%);color:#fff;padding:14px max(20px,calc((100vw - 1450px)/2));box-shadow:0 3px 14px rgba(14,35,64,.32);border-bottom:3px solid #3f8fe0;display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap}
+header h1{margin:0;font-size:23px;letter-spacing:.3px}
+header p{color:#bcd0ea;margin:4px 0 0;font-size:13px}
+.badge{display:inline-flex;align-items:center;gap:7px;padding:7px 16px;border:1px solid rgba(255,255,255,.32);border-radius:20px;background:rgba(255,255,255,.12);color:#dbe7f7;font-size:12.5px;letter-spacing:.3px;white-space:nowrap}
+.badge b{color:#fff;font-weight:700;letter-spacing:.6px}
+.badge.bad b{color:#ffd7d7}
+main{max-width:1450px;margin:22px auto;padding:0 18px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.card,.panel{background:#fff;border:1px solid #e3e8f0;border-radius:11px;padding:15px}
+.card small{display:block;color:#68758b}
+.card strong{display:block;font-size:26px;margin-top:4px}
+.card small.sub{margin-top:4px;font-size:11px;color:#7b879b}
+.card.ok{background:#e9f7ee;border-color:#b6e0c4;color:#14653a}
+.card.ok small{color:#1b7c4a}
+.card.bad{background:#fdeaea;border-color:#f0b6bb;color:#8d1b2c}
+.card.bad small{color:#a3243a}
+.card.warn{background:#fff7df;border-color:#f0dfa4;color:#7a5600}
+.card.warn small{color:#93701a}
+.panel{margin-top:16px}
+.panel h2{margin:0 0 10px;font-size:16px;color:#2b3a55}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:16px}
+.grid2 .panel{margin-top:16px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid #eef1f6;white-space:nowrap}
+th{color:#68758b;font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.4px}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+.bar{height:7px;border-radius:4px;background:#eef1f6;overflow:hidden;min-width:90px}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,#2f9e6b,#57c08c)}
+.bar.bad i{background:linear-gradient(90deg,#c9433f,#e07672)}
+.chart{display:flex;align-items:flex-end;gap:4px;height:150px;padding:8px 2px 0}
+.chart .col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:3px;height:100%}
+.chart .stack{width:100%;display:flex;flex-direction:column;justify-content:flex-end;height:100%}
+.chart .seg{width:100%}
+.chart .seg.ok{background:linear-gradient(180deg,#57c08c,#2f9e6b)}
+.chart .seg.bad{background:linear-gradient(180deg,#e07672,#c9433f)}
+.chart .seg.other{background:#c8cfdb}
+.chart small{font-size:10px;color:#8b96a8;white-space:nowrap;transform:rotate(-35deg);transform-origin:right center;height:14px}
+.legend{display:flex;gap:16px;font-size:12px;color:#68758b;margin-top:8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}
+footer{max-width:1450px;margin:18px auto 30px;padding:0 18px;color:#8b96a8;font-size:12px}
+"""
+
+
+def format_ratio(value):
+    return "-" if value is None else f"{value * 100:.2f}%"
+
+
+def render_dashboard(data):
+    """渲染运行状态仪表盘（纯 HTML/CSS，无外部依赖）"""
+
+    backend = data.get("backend") or {}
+    executions = data.get("executions") or {}
+    window = executions.get("window") or {}
+    all_time = executions.get("all_time") or {}
+    by_namespace = data.get("by_namespace") or {}
+    top_flows = data.get("top_flows") or []
+    hourly = data.get("hourly") or {}
+    inventory = data.get("flow_inventory") or {}
+
+    healthy = data.get("status") == "ok"
+    status_text = "正常" if healthy else "降级"
+
+    cards = [
+        ("24 小时执行", str(window.get("total", 0)), "窗口内执行总数"),
+        ("成功率", format_ratio(window.get("success_ratio")), "success / (success + failed)"),
+        ("失败", str(window.get("failed", 0)), "FAILED"),
+        ("进行中", str(window.get("running", 0)), "RUNNING"),
+        ("待处理", str(window.get("pending", 0)), "CREATED"),
+        ("已暂停", str(window.get("paused", 0)), "PAUSED"),
+        ("累计执行", str(all_time.get("total", 0)), "全部历史"),
+        ("Flow 数", str(inventory.get("total") or 0), "命名空间内 flow 总量"),
+    ]
+
+    card_html = "".join(
+        f'<div class="card"><small>{html.escape(title)}</small>'
+        f"<strong>{html.escape(value)}</strong>"
+        f'<small class="sub">{html.escape(sub)}</small></div>'
+        for title, value, sub in cards
+    )
+
+    peak = max([item.get("total", 0) for item in hourly.values()] or [1]) or 1
+
+    bars = []
+
+    for bucket, item in hourly.items():
+        total = item.get("total", 0) or 1
+        ok_h = round(item.get("success", 0) / total * 100, 1)
+        bad_h = round(item.get("failed", 0) / total * 100, 1)
+        other_h = max(0.0, 100 - ok_h - bad_h)
+        height = max(3, round(item.get("total", 0) / peak * 100, 1))
+
+        bars.append(
+            f'<div class="col" title="{html.escape(bucket)} 成功 {item.get("success", 0)}'
+            f' 失败 {item.get("failed", 0)}">'
+            f'<div class="stack" style="height:{height}%">'
+            f'<div class="seg other" style="height:{other_h}%"></div>'
+            f'<div class="seg bad" style="height:{bad_h}%"></div>'
+            f'<div class="seg ok" style="height:{ok_h}%"></div>'
+            f"</div><small>{html.escape(bucket[6:])}</small></div>"
+        )
+
+    ns_rows = []
+
+    for namespace, item in sorted(by_namespace.items(), key=lambda kv: kv[1].get("total", 0), reverse=True):
+        ratio = item.get("success_ratio") or 0
+        ns_rows.append(
+            f"<tr><td>{html.escape(str(namespace))}</td>"
+            f'<td class="num">{item.get("total", 0)}</td>'
+            f'<td class="num">{item.get("success", 0)}</td>'
+            f'<td class="num">{item.get("failed", 0)}</td>'
+            f'<td class="num">{format_ratio(item.get("success_ratio"))}</td>'
+            f'<td><div class="bar{" bad" if item.get("failed") else ""}">'
+            f'<i style="width:{round(ratio * 100, 1)}%"></i></div></td></tr>'
+        )
+
+    flow_rows = []
+
+    for item in top_flows:
+        ratio = item.get("success_ratio") or 0
+        flow_rows.append(
+            f"<tr><td>{html.escape(str(item.get('namespace')))}</td>"
+            f"<td>{html.escape(str(item.get('flow_id')))}</td>"
+            f'<td class="num">{item.get("total", 0)}</td>'
+            f'<td class="num">{item.get("success", 0)}</td>'
+            f'<td class="num">{item.get("failed", 0)}</td>'
+            f'<td class="num">{format_ratio(item.get("success_ratio"))}</td>'
+            f'<td class="num">{html.escape(str(item.get("last_run") or "-"))}</td></tr>'
+        )
+
+    template = (
+        "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<meta http-equiv="refresh" content="30">'
+        "<title>Kestra MCP 网关 · 运行状态</title><style>__CSS__</style></head><body>"
+        "<header><div><h1>Kestra MCP 网关 · 运行状态</h1>"
+        "<p>生成时间 __GENERATED__ · 后端响应 __LATENCY__ ms</p></div>"
+        "<div class=\"badge__BADGE__\"><b>__STATUS__</b> 网关与后端连通性</div></header>"
+        "<main>"
+        '<div class="cards">__CARDS__</div>'
+        '<div class="panel"><h2>每小时执行趋势（近 __HOURS__ 小时）</h2>'
+        '<div class="chart">__BARS__</div>'
+        '<div class="legend"><span><i style="background:#2f9e6b"></i>成功</span>'
+        '<span><i style="background:#c9433f"></i>失败</span>'
+        '<span><i style="background:#c8cfdb"></i>其它</span></div></div>'
+        '<div class="grid2">'
+        '<div class="panel"><h2>按命名空间</h2><table><thead><tr><th>命名空间</th>'
+        '<th class="num">总数</th><th class="num">成功</th><th class="num">失败</th>'
+        '<th class="num">成功率</th><th>占比</th></tr></thead><tbody>__NS_ROWS__</tbody></table></div>'
+        '<div class="panel"><h2>Top Flows</h2><table><thead><tr><th>命名空间</th><th>Flow</th>'
+        '<th class="num">总数</th><th class="num">成功</th><th class="num">失败</th>'
+        '<th class="num">成功率</th><th class="num">最后运行</th></tr></thead>'
+        "<tbody>__FLOW_ROWS__</tbody></table></div></div></main>"
+        "<footer>数据来自网关 /api/v2/health（JSON），页面每 30 秒自动刷新。</footer>"
+        "</body></html>"
+    )
+
+    page = (
+        template.replace("__CSS__", DASHBOARD_CSS)
+        .replace("__GENERATED__", html.escape(str(data.get("generated_at") or "")))
+        .replace("__LATENCY__", html.escape(str(backend.get("latency_ms"))))
+        .replace("__BADGE__", "" if healthy else " bad")
+        .replace("__STATUS__", status_text)
+        .replace("__CARDS__", card_html)
+        .replace("__HOURS__", html.escape(str((data.get("window") or {}).get("hours", 24))))
+        .replace("__BARS__", "".join(bars))
+        .replace("__NS_ROWS__", "".join(ns_rows) or '<tr><td colspan="6">暂无数据</td></tr>')
+        .replace("__FLOW_ROWS__", "".join(flow_rows) or '<tr><td colspan="7">暂无数据</td></tr>')
+    )
+
+    return page
+
+
 @app.get("/api/v2/health")
-async def health():
-    """网关自身 + 后端 Kestra 的健康检查与执行统计"""
+async def health(request: Request):
+    """网关自身 + 后端 Kestra 的健康检查与执行统计（浏览器返回仪表盘）"""
 
     backend = {"status": "ok"}
 
@@ -542,6 +749,8 @@ async def health():
     backend["latency_ms"] = round((time.perf_counter() - started) * 1000, 1)
 
     # 后端执行统计（带缓存）
+    stats = {}
+
     try:
         stats = await collect_stats(STATS_WINDOW_HOURS, STATS_TOP)
 
@@ -550,19 +759,37 @@ async def health():
         backend["by_namespace"] = stats["by_namespace"]
         backend["top_flows"] = stats["top_flows"]
         backend["hourly"] = stats["hourly"]
+        backend["flows"] = stats["flow_inventory"]
 
     except Exception as exc:
         backend.setdefault("detail", type(exc).__name__)
 
     healthy = backend["status"] == "ok"
 
-    return JSONResponse(
-        status_code=200 if healthy else 503,
-        content={
-            "status": "ok" if healthy else "degraded",
-            "backend": backend,
-        },
-    )
+    payload = {
+        "status": "ok" if healthy else "degraded",
+        "backend": backend,
+    }
+
+    accept = request.headers.get("accept", "")
+
+    if "text/html" in accept and "application/json" not in accept:
+        page = render_dashboard(
+            {
+                **payload,
+                "generated_at": stats.get("generated_at"),
+                "window": stats.get("window"),
+                "executions": stats.get("executions"),
+                "by_namespace": stats.get("by_namespace"),
+                "top_flows": stats.get("top_flows"),
+                "hourly": stats.get("hourly"),
+                "flow_inventory": stats.get("flow_inventory"),
+            }
+        )
+
+        return HTMLResponse(content=page, status_code=200 if healthy else 503)
+
+    return JSONResponse(status_code=200 if healthy else 503, content=payload)
 
 
 @app.api_route(
