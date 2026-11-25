@@ -1,9 +1,9 @@
-# Kestra MCP PDP Gateway — 管理 API 使用说明
+# Kestra MCP 网关 — 管理 API 使用说明
 
 网关地址：`https://kestra.feg.cn`，所有接口前缀 `/api/v2`。
 
 - 认证：网关 Basic Auth，**每个账号独立密码**
-- 授权：网关会做策略判定与 flow 归属校验，未通过直接返回 4xx
+- 授权：网关会做访问授权与 flow 归属校验，未通过直接返回 4xx
 - Kestra 原生 `/api/v1/*`（UI 使用）不经过本网关
 
 ---
@@ -139,39 +139,21 @@ curl -s -u "$AUTH" -X DELETE "$BASE/flows/main/u199013_daily"            # 删
 |---|---|---|
 | 400 | `{"detail":"Tenant must be 'main'"}` | 请求里带了非 `main` 的租户（`X-Kestra-Tenant` 头或 `?tenant=`） |
 | 401 | `{"detail":"Unauthorized"}` | 缺少/错误的 Basic Auth，或账号未分配 |
-| 403 | `{"detail":"Forbidden"}` | 策略判定不通过（授权服务不可用时也会按拒绝处理） |
+| 403 | `{"detail":"Forbidden"}` | 无权访问该资源 |
 | 403 | `{"detail":"Flow id must be prefixed with '<账号>_'"}` | flow id 不属于当前账号 |
 | 404 | `{"detail":"Not Found"}` | 网关没有该接口（例如 `/health`、`/api/v1/*`） |
 | 其它 | Kestra 原始响应 | 上游返回的状态码与响应体原样返回 |
 
 ---
 
-## 6. 配置项（管理员）
+## 6. 管理员
+
+### 6.1 配置项
 
 | 配置项 | 说明 |
 |---|---|
 | `GATEWAY_USERS` | 各账号密码，格式 `账号:密码,账号:密码`；未列出的账号无法登录 |
 | `KESTRA_BASIC_AUTH` | 网关访问 Kestra 后端所用凭证（Base64 的 `账号:密码`） |
-| `CERBOS_URL` | 授权服务地址 |
-
-### 6.1 策略维护
-
-策略文件在 `cerbos/policies/`，修改后用 Admin API 发布（立即生效，无需重启网关）：
-
-```bash
-CERBOS_URL=http://10.17.1.201:3592 \
-CERBOS_ADMIN_USER=cerbos CERBOS_ADMIN_PASSWORD=cerbosAdmin \
-python3 cerbos/deploy_policy.py                      # 发布全部策略
-python3 cerbos/deploy_policy.py cerbos/policies/kestra-api.yaml   # 发布单个策略
-```
-
-| 用途 | 方法 | 路径 | 请求体 |
-|---|---|---|---|
-| 发布/更新策略 | `POST` | `{CERBOS_URL}/admin/policy` | `{"policies": [<策略文档>]}` |
-| 策略列表 | `GET` | `{CERBOS_URL}/admin/policies` | — |
-| 读取单个策略 | `GET` | `{CERBOS_URL}/admin/policy?id=<策略ID>` | — |
-
-> 策略 ID 形如 `resource.kestra_api.vdefault`（前缀为 `resource.` + 资源名 + `.v` + 版本）。
 
 ### 6.2 部署
 
