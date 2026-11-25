@@ -11,6 +11,9 @@ services:
       # Kestra 后端地址
       BACKEND_URL: "http://10.17.1.201:38080"
 
+      # Kestra 租户（管理 API 需要）
+      KESTRA_TENANT: "main"
+
       # 后端原有 Basic Auth（Base64）
       KESTRA_BASIC_AUTH: "d3UuemhpcGluZ0BmZWcuY246UEBzc3cwcmQxMTA="
 

@@ -1,0 +1,12 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: kestra-api
+  rules:
+    # 允许白名单账号通过网关管理 Kestra 管理 API（/api/v1/*）
+    - actions: ["read", "create", "update", "delete"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: request.principal.id in ["u041007", "u199013"]
