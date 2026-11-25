@@ -258,11 +258,11 @@ async def gateway(request: Request, target: str, rest: str = ""):
 
 
 @app.api_route(
-    "/api/v1/{rest:path}",
+    "/api/v2/{rest:path}",
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 )
 async def kestra_api(request: Request, rest: str):
-    """Kestra 管理 API 代理：/api/v1/*，按 Cerbos 策略授权"""
+    """Kestra 管理 API 代理：/api/v2/* -> 后端 /api/v1/*，按 Cerbos 策略授权"""
 
     principal = authenticate(request)
 
