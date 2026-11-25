@@ -611,17 +611,17 @@ def render_dashboard(data):
     inventory = data.get("flow_inventory") or {}
 
     healthy = data.get("status") == "ok"
-    status_text = "正常" if healthy else "降级"
+    status_text = "正常" if healthy else "降級"
 
     cards = [
-        ("24 小时执行", str(window.get("total", 0)), "窗口内执行总数"),
+        ("24 小時執行", str(window.get("total", 0)), "視窗內執行總數"),
         ("成功率", format_ratio(window.get("success_ratio")), "success / (success + failed)"),
-        ("失败", str(window.get("failed", 0)), "FAILED"),
-        ("进行中", str(window.get("running", 0)), "RUNNING"),
-        ("待处理", str(window.get("pending", 0)), "CREATED"),
-        ("已暂停", str(window.get("paused", 0)), "PAUSED"),
-        ("累计执行", str(all_time.get("total", 0)), "全部历史"),
-        ("Flow 数", str(inventory.get("total") or 0), "命名空间内 flow 总量"),
+        ("失敗", str(window.get("failed", 0)), "FAILED"),
+        ("進行中", str(window.get("running", 0)), "RUNNING"),
+        ("待處理", str(window.get("pending", 0)), "CREATED"),
+        ("已暫停", str(window.get("paused", 0)), "PAUSED"),
+        ("累計執行", str(all_time.get("total", 0)), "全部歷史"),
+        ("Flow 數", str(inventory.get("total") or 0), "命名空間內 flow 總量"),
     ]
 
     card_html = "".join(
@@ -644,7 +644,7 @@ def render_dashboard(data):
 
         bars.append(
             f'<div class="col" title="{html.escape(bucket)} 成功 {item.get("success", 0)}'
-            f' 失败 {item.get("failed", 0)}">'
+            f' 失敗 {item.get("failed", 0)}">'
             f'<div class="stack" style="height:{height}%">'
             f'<div class="seg other" style="height:{other_h}%"></div>'
             f'<div class="seg bad" style="height:{bad_h}%"></div>'
@@ -681,29 +681,29 @@ def render_dashboard(data):
         )
 
     template = (
-        "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
+        "<!doctype html><html lang=\"zh-Hant\"><head><meta charset=\"utf-8\">"
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         '<meta http-equiv="refresh" content="30">'
-        "<title>Kestra MCP 网关 · 运行状态</title><style>__CSS__</style></head><body>"
-        "<header><div><h1>Kestra MCP 网关 · 运行状态</h1>"
-        "<p>生成时间 __GENERATED__ · 后端响应 __LATENCY__ ms</p></div>"
-        "<div class=\"badge__BADGE__\"><b>__STATUS__</b> 网关与后端连通性</div></header>"
+        "<title>ETL Automation — The Engine of Intelligent Data Orchestration</title><style>__CSS__</style></head><body>"
+        "<header><div><h1>ETL Automation — The Engine of Intelligent Data Orchestration</h1>"
+        "<p>生成時間 __GENERATED__ · 後端回應 __LATENCY__ ms</p></div>"
+        "<div class=\"badge__BADGE__\"><b>__STATUS__</b> 網關與後端連通性</div></header>"
         "<main>"
         '<div class="cards">__CARDS__</div>'
-        '<div class="panel"><h2>每小时执行趋势（近 __HOURS__ 小时）</h2>'
+        '<div class="panel"><h2>每小時執行趨勢（近 __HOURS__ 小時）</h2>'
         '<div class="chart">__BARS__</div>'
         '<div class="legend"><span><i style="background:#2f9e6b"></i>成功</span>'
-        '<span><i style="background:#c9433f"></i>失败</span>'
+        '<span><i style="background:#c9433f"></i>失敗</span>'
         '<span><i style="background:#c8cfdb"></i>其它</span></div></div>'
         '<div class="grid2">'
-        '<div class="panel"><h2>按命名空间</h2><table><thead><tr><th>命名空间</th>'
-        '<th class="num">总数</th><th class="num">成功</th><th class="num">失败</th>'
-        '<th class="num">成功率</th><th>占比</th></tr></thead><tbody>__NS_ROWS__</tbody></table></div>'
-        '<div class="panel"><h2>Top Flows</h2><table><thead><tr><th>命名空间</th><th>Flow</th>'
-        '<th class="num">总数</th><th class="num">成功</th><th class="num">失败</th>'
-        '<th class="num">成功率</th><th class="num">最后运行</th></tr></thead>'
+        '<div class="panel"><h2>按命名空間</h2><table><thead><tr><th>命名空間</th>'
+        '<th class="num">總數</th><th class="num">成功</th><th class="num">失敗</th>'
+        '<th class="num">成功率</th><th>佔比</th></tr></thead><tbody>__NS_ROWS__</tbody></table></div>'
+        '<div class="panel"><h2>Top Flows</h2><table><thead><tr><th>命名空間</th><th>Flow</th>'
+        '<th class="num">總數</th><th class="num">成功</th><th class="num">失敗</th>'
+        '<th class="num">成功率</th><th class="num">最後執行</th></tr></thead>'
         "<tbody>__FLOW_ROWS__</tbody></table></div></div></main>"
-        "<footer>数据来自网关 /api/v2/health（JSON），页面每 30 秒自动刷新。</footer>"
+        "<footer>資料來自網關 /api/v2/health（JSON），頁面每 30 秒自動重新整理。</footer>"
         "</body></html>"
     )
 
@@ -716,8 +716,8 @@ def render_dashboard(data):
         .replace("__CARDS__", card_html)
         .replace("__HOURS__", html.escape(str((data.get("window") or {}).get("hours", 24))))
         .replace("__BARS__", "".join(bars))
-        .replace("__NS_ROWS__", "".join(ns_rows) or '<tr><td colspan="6">暂无数据</td></tr>')
-        .replace("__FLOW_ROWS__", "".join(flow_rows) or '<tr><td colspan="7">暂无数据</td></tr>')
+        .replace("__NS_ROWS__", "".join(ns_rows) or '<tr><td colspan="6">暫無資料</td></tr>')
+        .replace("__FLOW_ROWS__", "".join(flow_rows) or '<tr><td colspan="7">暫無資料</td></tr>')
     )
 
     return page
