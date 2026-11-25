@@ -1,0 +1,15 @@
+apiVersion: api.cerbos.dev/v1
+policies:
+  kestra-mcp:
+    resource: kestra-mcp
+    version: default
+    rules:
+      - actions:
+          - access
+          - view
+          - use
+        effect: EFFECT_ALLOW
+        roles:
+          - user
+        condition:
+          expression: 'request.principal.id in ["u041007", "u199013"] && request.resource.id in ["u041007", "u199013"]'

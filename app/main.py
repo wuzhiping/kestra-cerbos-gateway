@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
-BACKEND = "http://10.17.1.201:38080"
+BACKEND = os.getenv("BACKEND_URL", "http://10.17.1.201:38080")
 MCP_PREFIX = "/api/v1/main/mcp"
 
 # 原有后端 Basic Auth
@@ -17,7 +17,39 @@ BACKEND_AUTH = os.getenv("KESTRA_BASIC_AUTH", "")
 GATEWAY_USER = os.getenv("GATEWAY_USER", "u041007")
 GATEWAY_PASSWORD = os.getenv("GATEWAY_PASSWORD", "")
 
-PROTECTED_TARGET = "u041007"
+
+def _parse_gateway_users() -> dict:
+    """解析 GATEWAY_USERS：格式为 账号:密码,账号:密码（每个账号各自密码）"""
+
+    users = {}
+
+    for item in os.getenv("GATEWAY_USERS", "").split(","):
+        item = item.strip()
+
+        if not item or ":" not in item:
+            continue
+
+        account, password = item.split(":", 1)
+        account = account.strip()
+
+        if account:
+            users[account] = password
+
+    return users
+
+
+# 各账号独立密码
+GATEWAY_USERS = _parse_gateway_users()
+
+# 兼容单账号配置
+if not GATEWAY_USERS and GATEWAY_USER:
+    GATEWAY_USERS = {GATEWAY_USER: GATEWAY_PASSWORD}
+
+# Cerbos PDP 地址
+CERBOS_URL = os.getenv("CERBOS_URL", "").rstrip("/")
+
+# 受保护账号（需要 Cerbos 额外授权）
+PROTECTED_TARGETS = {"u041007", "u199013"}
 
 app = FastAPI(title="MCP PDP Gateway")
 
@@ -32,10 +64,12 @@ async def shutdown():
 
 
 def authenticate(request: Request):
+    """校验 Gateway Basic Auth，返回访问者账号（Cerbos principal id）"""
+
     auth = request.headers.get("Authorization", "")
 
     if not auth.startswith("Basic "):
-        return False
+        return None
 
     try:
         decoded = base64.b64decode(
@@ -45,12 +79,60 @@ def authenticate(request: Request):
         username, password = decoded.split(":", 1)
 
     except Exception:
+        return None
+
+    account = username.strip() or GATEWAY_USER
+
+    expected = GATEWAY_USERS.get(account)
+
+    if not expected or not secrets.compare_digest(password, expected):
+        return None
+
+    return account
+
+
+async def cerbos_allow(principal_id: str, target: str) -> bool:
+    """调用 Cerbos PDP，判断 principal 是否有权访问 target"""
+
+    if not CERBOS_URL:
         return False
 
-    return (
-        secrets.compare_digest(username, GATEWAY_USER)
-        and secrets.compare_digest(password, GATEWAY_PASSWORD)
-    )
+    payload = {
+        "requestId": f"{principal_id}-{target}",
+        "principal": {
+            "id": principal_id,
+            "roles": ["user"],
+            "policyVersion": "default",
+        },
+        "resources": [
+            {
+                "resource": {"kind": "kestra-mcp", "id": target},
+                "actions": ["access"],
+            }
+        ],
+    }
+
+    try:
+        response = await client.post(
+            f"{CERBOS_URL}/api/check/resources",
+            json=payload,
+            timeout=httpx.Timeout(5.0, connect=3.0),
+        )
+        response.raise_for_status()
+        data = response.json()
+
+    except Exception:
+        # Cerbos 不可用时按拒绝处理（fail closed）
+        return False
+
+    results = data.get("results") or []
+
+    if not results:
+        return False
+
+    actions = results[0].get("actions") or {}
+
+    return actions.get("access") == "EFFECT_ALLOW"
 
 
 @app.get("/health")
@@ -68,16 +150,24 @@ async def health():
 )
 async def gateway(request: Request, target: str, rest: str = ""):
 
-    # PDP：针对 u041007 进行额外授权
-    if target == PROTECTED_TARGET:
+    # PDP：针对受保护账号进行 Cerbos 授权
+    if target in PROTECTED_TARGETS:
 
-        if not authenticate(request):
+        principal = authenticate(request)
+
+        if principal is None:
             raise HTTPException(
                 status_code=401,
                 detail="Unauthorized",
                 headers={
                     "WWW-Authenticate": 'Basic realm="MCP Gateway"'
                 },
+            )
+
+        if not await cerbos_allow(principal, target):
+            raise HTTPException(
+                status_code=403,
+                detail="Forbidden",
             )
 
     # 防止路径穿越

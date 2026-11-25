@@ -1,17 +1,29 @@
 services:
-  mcp-pdp:
+  kestra-mcp:
     build: .
-    container_name: mcp-pdp
+    container_name: kestra-mcp
     restart: always
 
     ports:
       - "8080:8080"
 
     environment:
-      KESTRA_BASIC_AUTH: "${KESTRA_BASIC_AUTH}"
+      # Kestra 后端地址
+      BACKEND_URL: "http://10.17.1.201:38080"
 
+      # 后端原有 Basic Auth（Base64）
+      KESTRA_BASIC_AUTH: "d3UuemhpcGluZ0BmZWcuY246UEBzc3dwcmQxMTA="
+
+      # Gateway 默认账号
       GATEWAY_USER: "u041007"
-      GATEWAY_PASSWORD: "${GATEWAY_PASSWORD}"
+
+      # Gateway 各账号独立密码（格式：账号:密码,账号:密码；请替换为各账号真实密码）
+      GATEWAY_USERS: "u041007:your-new-password,u199013:your-new-password-u199013"
+
+      # Cerbos 策略引擎地址
+      CERBOS_URL: "http://10.17.1.201:3592"
+      CERBOS_ADMIN_USER: "cerbos"
+      CERBOS_ADMIN_PASSWORD: "cerbosAdmin"
 
     healthcheck:
       test:
