@@ -1,5 +1,7 @@
 import os
 import base64
+import json
+import re
 import secrets
 from urllib.parse import urlencode
 
@@ -183,6 +185,68 @@ def ensure_tenant(request: Request):
         )
 
 
+def flow_id_from_body(request: Request, body: bytes):
+    """从创建 flow 的请求体（YAML/JSON）中取出 flow id"""
+
+    if not body:
+        return None
+
+    content_type = (request.headers.get("content-type") or "").lower()
+
+    if "json" in content_type:
+        try:
+            payload = json.loads(body)
+        except Exception:
+            return None
+
+        if isinstance(payload, dict):
+            flow = payload.get("flow") if isinstance(payload.get("flow"), dict) else payload
+            return flow.get("id")
+
+        return None
+
+    # YAML：取顶层的 id 字段
+    match = re.search(
+        r"(?m)^id:\s*[\"']?([^\s\"']+)",
+        body.decode("utf-8", "replace"),
+    )
+
+    return match.group(1) if match else None
+
+
+def extract_flow_id(request: Request, rest: str, body: bytes):
+    """提取请求涉及到的 flow id（命名空间列表等无 flow id 的请求返回 None）"""
+
+    parts = [p for p in rest.split("/") if p]
+
+    if not parts or parts[0] != "flows":
+        return None
+
+    # flows/{namespace}/{flowId}[/...]
+    if len(parts) >= 3:
+        return parts[2]
+
+    # flows/{namespace}：命名空间级别的列表，不涉及单个 flow
+    if len(parts) == 2:
+        return None
+
+    # POST flows：flow id 在请求体里
+    return flow_id_from_body(request, body)
+
+
+def ensure_flow_owner(account: str, flow_id):
+    """flow id 必须以 "<账号>_" 前缀开头，否则禁止控制"""
+
+    if not flow_id:
+        return
+
+    if not flow_id.startswith(f"{account}_"):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Flow id must be prefixed with '{account}_'",
+        )
+
+
 async def proxy_to_backend(request: Request, path: str) -> StreamingResponse:
     """转发请求到 Kestra 后端，并注入后端 Basic Auth"""
 
@@ -323,5 +387,10 @@ async def kestra_api(request: Request, rest: str):
             status_code=403,
             detail="Forbidden",
         )
+
+    # flow 必须属于本人：flow id 需以 "<账号>_" 开头
+    body = await request.body()
+
+    ensure_flow_owner(principal, extract_flow_id(request, rest, body))
 
     return await proxy_to_backend(request, f"/api/v1/{rest}")
