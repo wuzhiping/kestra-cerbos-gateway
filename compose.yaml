@@ -18,7 +18,7 @@ services:
       GATEWAY_USER: "u041007"
 
       # Gateway 各账号独立密码（格式：账号:密码,账号:密码；请替换为各账号真实密码）
-      GATEWAY_USERS: "u041007:your-new-password,u199013:w199013"
+      GATEWAY_USERS: "u041007:w041007,u199013:w199013"
 
       # Cerbos 策略引擎地址
       CERBOS_URL: "http://10.17.1.201:3592"
