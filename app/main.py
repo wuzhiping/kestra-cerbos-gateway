@@ -1,6 +1,7 @@
 import os
 import base64
 import secrets
+from urllib.parse import urlencode
 
 import httpx
 from fastapi import FastAPI, Request, HTTPException
@@ -8,7 +9,12 @@ from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
 BACKEND = os.getenv("BACKEND_URL", "http://10.17.1.201:38080")
-MCP_PREFIX = "/api/v1/main/mcp"
+
+# 网关对外暴露的 MCP 路径（映射到后端 /api/v1/main/mcp）
+MCP_PREFIX = "/api/v2/main/mcp"
+
+# Kestra 后端的 MCP 路径
+BACKEND_MCP_PREFIX = "/api/v1/main/mcp"
 
 # 原有后端 Basic Auth
 BACKEND_AUTH = os.getenv("KESTRA_BASIC_AUTH", "")
@@ -154,13 +160,43 @@ async def cerbos_allow(
     return actions.get(action) == "EFFECT_ALLOW"
 
 
+def requested_tenant(request: Request):
+    """取客户端请求的租户（X-Kestra-Tenant 头或 tenant 查询参数）"""
+
+    tenant = request.headers.get("x-kestra-tenant")
+
+    if not tenant:
+        tenant = request.query_params.get("tenant")
+
+    return tenant.strip() if tenant else None
+
+
+def ensure_tenant(request: Request):
+    """客户端请求的租户必须与网关配置的租户一致"""
+
+    tenant = requested_tenant(request)
+
+    if tenant and tenant != KESTRA_TENANT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Tenant must be '{KESTRA_TENANT}'",
+        )
+
+
 async def proxy_to_backend(request: Request, path: str) -> StreamingResponse:
     """转发请求到 Kestra 后端，并注入后端 Basic Auth"""
 
+    # 转发时去掉客户端指定的 tenant，统一由网关注入
+    query = [
+        (k, v)
+        for k, v in request.query_params.multi_items()
+        if k.lower() != "tenant"
+    ]
+
     url = BACKEND + path
 
-    if request.url.query:
-        url += "?" + request.url.query
+    if query:
+        url += "?" + urlencode(query)
 
     # 覆盖客户端的 Authorization，使用后端原有认证
     headers = dict(request.headers)
@@ -168,6 +204,7 @@ async def proxy_to_backend(request: Request, path: str) -> StreamingResponse:
     headers.pop("host", None)
     headers.pop("authorization", None)
     headers.pop("content-length", None)
+    headers.pop("x-kestra-tenant", None)
 
     if BACKEND_AUTH:
         headers["Authorization"] = (
@@ -215,14 +252,16 @@ async def health():
 
 
 @app.api_route(
-    "/api/v1/main/mcp/{target}",
+    f"{MCP_PREFIX}/{{target}}",
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 )
 @app.api_route(
-    "/api/v1/main/mcp/{target}/{rest:path}",
+    f"{MCP_PREFIX}/{{target}}/{{rest:path}}",
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 )
 async def gateway(request: Request, target: str, rest: str = ""):
+
+    ensure_tenant(request)
 
     # PDP：针对受保护账号进行 Cerbos 授权
     if target in PROTECTED_TARGETS:
@@ -249,7 +288,7 @@ async def gateway(request: Request, target: str, rest: str = ""):
         raise HTTPException(400, "Invalid target")
 
     # 组装后端 URL
-    path = f"{MCP_PREFIX}/{target}"
+    path = f"{BACKEND_MCP_PREFIX}/{target}"
 
     if rest:
         path += f"/{rest}"
@@ -263,6 +302,8 @@ async def gateway(request: Request, target: str, rest: str = ""):
 )
 async def kestra_api(request: Request, rest: str):
     """Kestra 管理 API 代理：/api/v2/* -> 后端 /api/v1/*，按 Cerbos 策略授权"""
+
+    ensure_tenant(request)
 
     principal = authenticate(request)
 
