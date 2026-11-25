@@ -1,15 +1,13 @@
 apiVersion: api.cerbos.dev/v1
-policies:
-  kestra-mcp:
-    resource: kestra-mcp
-    version: default
-    rules:
-      - actions:
-          - access
-          - view
-          - use
-        effect: EFFECT_ALLOW
-        roles:
-          - user
-        condition:
-          expression: 'request.principal.id in ["u041007", "u199013"] && request.resource.id in ["u041007", "u199013"]'
+resourcePolicy:
+  version: default
+  resource: kestra-mcp
+  rules:
+    # 受保护账号 u041007 / u199013 可互访彼此的 MCP 资源
+    - actions: ["access"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: request.principal.id in ["u041007", "u199013"] &&
+            request.resource.id in ["u041007", "u199013"]
