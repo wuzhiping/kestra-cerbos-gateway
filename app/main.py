@@ -246,7 +246,7 @@ async def proxy_to_backend(request: Request, path: str) -> StreamingResponse:
     )
 
 
-@app.get("/health")
+@app.get("/api/v2/health")
 async def health():
     return {"status": "ok"}
 
