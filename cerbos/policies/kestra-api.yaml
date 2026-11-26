@@ -3,10 +3,14 @@ resourcePolicy:
   version: default
   resource: kestra-api
   rules:
-    # 管理 API 的准入交给代码控制：
-    #   - 账号白名单：网关 Basic Auth（GATEWAY_USERS），未配置账号直接 401
-    #   - flow 归属：flow id 必须以 "<账号>_" 开头，否则 403
-    # 因此这里放开到所有通过网关认证的账号（roles=user）
+    # 管理 API 的准入与 flow 归属都由策略判定：
+    #   - 账号准入：网关 Basic Auth（GATEWAY_USERS），未配置账号直接 401
+    #   - 资源标识：具体 flow 为 flow/{flowId}，其余为 path/{请求路径}
+    #   - flow 归属：flow/{flowId} 必须以 "<principal.id>_" 开头
     - actions: ["read", "create", "update", "delete"]
       effect: EFFECT_ALLOW
       roles: ["user"]
+      condition:
+        match:
+          expr: request.resource.id.startsWith("path/") ||
+            request.resource.id.startsWith("flow/" + request.principal.id + "_")

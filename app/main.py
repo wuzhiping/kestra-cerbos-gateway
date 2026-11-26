@@ -287,6 +287,17 @@ def extract_flow_id(request: Request, rest: str, body: bytes):
     return flow_id_from_body(request, body)
 
 
+def _targets_flows(rest: str):
+    """请求路径是否指向 flow 资源"""
+
+    parts = [p for p in rest.split("/") if p]
+
+    while parts and parts[0] == KESTRA_TENANT:
+        parts = parts[1:]
+
+    return "flows" in parts
+
+
 def ensure_flow_owner(account: str, flow_id):
     """flow id 必须以 "<账号>_" 前缀开头，否则禁止控制"""
 
@@ -1159,17 +1170,29 @@ async def kestra_api(request: Request, rest: str):
 
     action = API_ACTIONS.get(request.method.upper(), "read")
 
+    body = await request.body()
+
+    flow_id = extract_flow_id(request, rest, body)
+
+    # flow 归属：flow id 需以 "<账号>_" 开头
+    ensure_flow_owner(principal, flow_id)
+
+    # 资源标识交给策略判定：具体 flow 用 flow/{flowId}，其余用 path/{路径}
+    resource_id = f"flow/{flow_id}" if flow_id else f"path/{rest}"
+
     if not await cerbos_allow(
-        principal, rest, action, kind="kestra-api", ip=client_ip(request)
+        principal, resource_id, action, kind="kestra-api", ip=client_ip(request)
     ):
         raise HTTPException(
             status_code=403,
             detail="Forbidden",
         )
 
-    # flow 必须属于本人：flow id 需以 "<账号>_" 开头
-    body = await request.body()
-
-    ensure_flow_owner(principal, extract_flow_id(request, rest, body))
+    # 创建 flow 却无法确定 flow id 时按拒绝处理（fail closed）
+    if request.method.upper() == "POST" and _targets_flows(rest) and not flow_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Flow id could not be determined",
+        )
 
     return await proxy_to_backend(request, f"/api/v1/{rest}")
