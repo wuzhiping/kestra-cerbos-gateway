@@ -500,14 +500,22 @@ async def collect_stats(window_hours: int, top: int):
         _stats_cache["at"] = now
         _stats_cache["data"] = (executions, total, fetched_at, flow_inventory)
 
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
+    # 以当前时间为终点的 24 小时刻度（24 小时制，整点对齐）
+    now = datetime.now(timezone.utc)
+    end_hour = now.replace(minute=0, second=0, microsecond=0)
+    slot_keys = [
+        (end_hour - timedelta(hours=index)).strftime("%m-%d %H:00")
+        for index in range(23, -1, -1)
+    ]
+
+    cutoff = end_hour - timedelta(hours=23)
 
     all_states = Counter()
     window_states = Counter()
     by_namespace = defaultdict(Counter)
     by_flow = defaultdict(Counter)
     last_run = {}
-    hourly = defaultdict(Counter)
+    hourly = {key: Counter() for key in slot_keys}
     durations = []
     active_flows = set()
 
@@ -537,8 +545,12 @@ async def collect_stats(window_hours: int, top: int):
 
         if started_at >= cutoff:
             window_states[current] += 1
-            hourly[started_at.strftime("%m-%d %H:00")][current] += 1
             active_flows.add(key)
+
+            bucket_key = started_at.strftime("%m-%d %H:00")
+
+            if bucket_key in hourly:
+                hourly[bucket_key][current] += 1
 
             if current in ("SUCCESS", "FAILED"):
                 seconds = parse_duration(state.get("duration"))
@@ -635,8 +647,8 @@ main{max-width:1500px;margin:22px auto;padding:0 18px}
 @media (max-width:900px){.cards{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:640px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .card{position:relative;overflow:hidden;background:#fff;border:1px solid var(--line);border-radius:14px;padding:15px 16px;
-  box-shadow:0 2px 8px rgba(20,40,80,.05);opacity:0;transform:translateY(14px);animation:rise .5s ease forwards}
-@keyframes rise{to{opacity:1;transform:none}}
+  box-shadow:0 2px 8px rgba(20,40,80,.05);opacity:1;transform:none;animation:rise .5s ease both}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
 .card::before{content:"";position:absolute;inset:0 auto 0 0;width:4px;background:linear-gradient(180deg,var(--accent,#2f6fed),transparent)}
 .card:hover{transform:translateY(-3px);box-shadow:0 12px 26px rgba(20,40,80,.14);transition:transform .18s ease,box-shadow .18s ease}
 .card small{display:block;color:var(--muted);font-size:12px;letter-spacing:.2px}
@@ -660,7 +672,7 @@ main{max-width:1500px;margin:22px auto;padding:0 18px}
 .summary{display:flex;gap:22px;align-items:center;flex-wrap:wrap}
 .donut{position:relative;width:132px;height:132px;border-radius:50%;flex:0 0 auto;
   background:conic-gradient(var(--green) 0 calc(var(--p,0)*1%),var(--rose) calc(var(--p,0)*1%) 100%);
-  animation:spinin .9s cubic-bezier(.2,.8,.2,1)}
+  transform:none;opacity:1;animation:spinin .9s cubic-bezier(.2,.8,.2,1) both}
 @keyframes spinin{from{transform:rotate(-90deg) scale(.86);opacity:.2}to{transform:none;opacity:1}}
 .donut::after{content:"";position:absolute;inset:15px;border-radius:50%;background:#fff}
 .donut em{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -671,7 +683,7 @@ main{max-width:1500px;margin:22px auto;padding:0 18px}
 .kv dd{margin:0;font-weight:600;font-variant-numeric:tabular-nums;text-align:right}
 
 .distbar{display:flex;height:16px;border-radius:9px;overflow:hidden;background:#eef1f7;margin:4px 0 10px}
-.distbar i{display:block;height:100%;width:0;transition:width .8s cubic-bezier(.2,.8,.2,1)}
+.distbar i{display:block;height:100%;transition:width .8s cubic-bezier(.2,.8,.2,1)}
 .distbar .ok{background:linear-gradient(90deg,#34c98a,#1fa971)}
 .distbar .bad{background:linear-gradient(90deg,#f0706d,#e5484d)}
 .distbar .run{background:linear-gradient(90deg,#7dd3fc,#0ea5e9)}
@@ -683,8 +695,8 @@ main{max-width:1500px;margin:22px auto;padding:0 18px}
 .chart{display:flex;align-items:flex-end;gap:4px;height:178px;padding:10px 2px 18px;overflow:hidden;width:100%}
 .chart .col{flex:1 1 0;min-width:0;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;height:100%;cursor:default;overflow:visible}
 .chart .stack{width:100%;max-width:26px;display:flex;flex-direction:column;justify-content:flex-end;height:100%;
-  transform-origin:bottom;transform:scaleY(0);animation:grow .7s cubic-bezier(.2,.8,.2,1) forwards}
-@keyframes grow{to{transform:scaleY(1)}}
+  transform-origin:bottom;transform:scaleY(1);animation:grow .7s cubic-bezier(.2,.8,.2,1) both}
+@keyframes grow{from{transform:scaleY(0)}to{transform:scaleY(1)}}
 .chart .seg{width:100%}
 .chart .seg.ok{background:linear-gradient(180deg,#4fd39b,#1fa971)}
 .chart .seg.bad{background:linear-gradient(180deg,#f47874,#e5484d)}
@@ -715,12 +727,13 @@ td.num:first-child{text-align:left}
 tbody td:first-child{font-weight:600;color:#2c3a56}
 .bar{height:8px;border-radius:5px;background:#eef1f7;overflow:hidden;min-width:110px}
 .bar i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,#34c98a,#1fa971);
-  width:0;transition:width .9s cubic-bezier(.2,.8,.2,1)}
+  transition:width .9s cubic-bezier(.2,.8,.2,1)}
 .bar.bad i{background:linear-gradient(90deg,#f0706d,#e5484d)}
 .tag{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11px;background:#eef2fb;color:#3d5ea8}
 .mask{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#54627a;letter-spacing:.4px}
 footer{max-width:1500px;margin:18px auto 30px;padding:0 18px;color:#8794ab;font-size:12px}
 @media (max-width:640px){.summary{gap:14px}.donut{width:104px;height:104px}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 """
 
 DASHBOARD_JS = """
