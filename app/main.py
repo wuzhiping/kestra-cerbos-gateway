@@ -964,25 +964,29 @@ def render_dashboard(data):
     pdp_decided = (pdp.get("allow", 0) or 0) + (pdp.get("deny", 0) or 0)
     pdp_allow_ratio = round((pdp.get("allow", 0) or 0) / pdp_decided, 4) if pdp_decided else None
 
+    # 每行 6 個，共 3 行：執行規模 → 執行狀態 → 耗時與授權決策
     cards = [
+        # 第一行：執行規模
         ("blue", "24 小時執行", window.get("total", 0), "視窗內執行總數", 0),
+        ("teal", "執行速率", summary.get("rate_per_minute", 0), "次 / 分鐘", 2),
+        ("blue", "累計執行", all_time.get("total", 0), "全部歷史", 0),
+        ("teal", "活躍 Flow", summary.get("active_flows", 0), "視窗內有執行", 0),
+        ("cyan", "Flow 總數", inventory.get("total") or 0, "命名空間內 flow 總量", 0),
+        ("cyan", "命名空間", len(by_namespace), "有執行記錄的命名空間", 0),
+        # 第二行：執行狀態
         ("green", "成功率", format_ratio(window.get("success_ratio")), "成功 ÷ 已完成", None),
         ("rose", "失敗", window.get("failed", 0), "FAILED", 0),
+        ("violet", "其它狀態", window.get("other", 0), "其它終態", 0),
         ("cyan", "進行中", window.get("running", 0), "RUNNING", 0),
         ("amber", "待處理", window.get("pending", 0), "CREATED", 0),
         ("violet", "已暫停", window.get("paused", 0), "PAUSED", 0),
-        ("teal", "執行速率", summary.get("rate_per_minute", 0), "次 / 分鐘", 2),
-        ("blue", "平均耗時", format_duration(summary.get("avg_duration_s")), "窗口內完成執行", None),
-        ("violet", "P95 耗時", format_duration(summary.get("p95_duration_s")), "窗口內完成執行", None),
-        ("teal", "活躍 Flow", summary.get("active_flows", 0), "窗口內有執行", 0),
-        ("cyan", "Flow 總數", inventory.get("total") or 0, "命名空間內 flow 總量", 0),
-        ("green", "累計執行", all_time.get("total", 0), "全部歷史", 0),
+        # 第三行：耗時與授權決策
+        ("teal", "平均耗時", format_duration(summary.get("avg_duration_s")), "視窗內完成執行", None),
+        ("teal", "P50 耗時", format_duration(summary.get("p50_duration_s")), "視窗內完成執行", None),
+        ("blue", "P95 耗時", format_duration(summary.get("p95_duration_s")), "視窗內完成執行", None),
         ("violet", "PDP 決策", pdp.get("total", 0), "Kestra 策略決策數", 0),
-        ("amber", "PDP 允許率", format_ratio(pdp_allow_ratio), "允許 ÷ 已決策", None),
+        ("green", "PDP 允許率", format_ratio(pdp_allow_ratio), "允許 ÷ 已決策", None),
         ("rose", "PDP 拒絕", pdp.get("deny", 0), "EFFECT_DENY", 0),
-        ("cyan", "P50 耗時", format_duration(summary.get("p50_duration_s")), "窗口內完成執行", None),
-        ("teal", "最長耗時", format_duration(summary.get("max_duration_s")), "窗口內完成執行", None),
-        ("blue", "命名空間", len(by_namespace), "有執行記錄的命名空間", 0),
     ]
 
     card_html = []
