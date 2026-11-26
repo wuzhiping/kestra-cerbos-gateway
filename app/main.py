@@ -486,6 +486,7 @@ async def fetch_cerbos_decisions(window_hours: int):
 
     kinds = {}
     principals = {}
+    by_ip = {}
     allow = 0
     deny = 0
 
@@ -515,8 +516,12 @@ async def fetch_cerbos_decisions(window_hours: int):
             request_id = item.get("requestId")
             kind_by_request[request_id] = kind
 
-            principal = (item.get("principal") or {}).get("id")
-            principals[principal] = principals.get(principal, 0) + 1
+            principal = item.get("principal") or {}
+            principal_id = principal.get("id")
+            principals[principal_id] = principals.get(principal_id, 0) + 1
+
+            source_ip = (principal.get("attr") or {}).get("ip") or "unknown"
+            by_ip[source_ip] = by_ip.get(source_ip, 0) + 1
 
             kinds.setdefault(kind, {"total": 0, "allow": 0, "deny": 0})
             kinds[kind]["total"] += 1
@@ -543,6 +548,9 @@ async def fetch_cerbos_decisions(window_hours: int):
     summary["by_kind"] = kinds
     summary["by_principal"] = dict(
         sorted(principals.items(), key=lambda kv: kv[1], reverse=True)[:10]
+    )
+    summary["by_ip"] = dict(
+        sorted(by_ip.items(), key=lambda kv: kv[1], reverse=True)[:10]
     )
 
     return summary
@@ -844,14 +852,16 @@ main{max-width:1500px;margin:22px auto;padding:0 18px}
 table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
 th,td{text-align:left;padding:9px 11px;white-space:nowrap}
 thead th{position:sticky;top:0;z-index:1;color:#5c6a83;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.7px;
-  background:linear-gradient(180deg,#f8fafd,#eef2f9);border-bottom:1px solid #dde4f0}
-tbody td{border-bottom:1px solid #eff2f8;color:#3a4761}
+  background:linear-gradient(180deg,#f8fafd,#eef2f9);border-bottom:1px solid #dde4f0;border-right:1px solid #e6ecf7}
+thead th:last-child{border-right:none}
+tbody td{border-bottom:1px solid #eef2f8;border-right:1px solid #f3f6fc;color:#3a4761}
+tbody td:last-child{border-right:none}
+tbody tr:last-child td{border-bottom:none}
 tbody tr:nth-child(odd){background:#f9fbfe}
 tbody tr:nth-child(even){background:#fff}
 tbody tr{transition:background .16s ease,box-shadow .16s ease}
 tbody tr:hover{background:#eaf1ff}
 tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
-tbody tr:last-child td{border-bottom:none}
 td.num{text-align:right;font-variant-numeric:tabular-nums}
 td.num:first-child{text-align:left}
 tbody td:first-child{font-weight:600;color:#2c3a56}
@@ -969,6 +979,10 @@ def render_dashboard(data):
         ("green", "累計執行", all_time.get("total", 0), "全部歷史", 0),
         ("violet", "PDP 決策", pdp.get("total", 0), "Kestra 策略決策數", 0),
         ("amber", "PDP 允許率", format_ratio(pdp_allow_ratio), "允許 ÷ 已決策", None),
+        ("rose", "PDP 拒絕", pdp.get("deny", 0), "EFFECT_DENY", 0),
+        ("cyan", "P50 耗時", format_duration(summary.get("p50_duration_s")), "窗口內完成執行", None),
+        ("teal", "最長耗時", format_duration(summary.get("max_duration_s")), "窗口內完成執行", None),
+        ("blue", "命名空間", len(by_namespace), "有執行記錄的命名空間", 0),
     ]
 
     card_html = []
@@ -1095,7 +1109,9 @@ def render_dashboard(data):
         '<div class="summary"><div class="kv" style="grid-template-columns:auto auto auto auto">__PDP_KV__</div></div>'
         '<div class="tablewrap" style="max-height:220px;margin-top:12px"><table><thead><tr><th>策略</th>'
         '<th class="num">決策數</th><th class="num">允許</th><th class="num">拒絕</th>'
-        '<th class="num">允許率</th><th>佔比</th></tr></thead><tbody>__PDP_ROWS__</tbody></table></div></div>'
+        '<th class="num">允許率</th><th>佔比</th></tr></thead><tbody>__PDP_ROWS__</tbody></table></div>'
+        '<div class="tablewrap" style="max-height:220px;margin-top:12px"><table><thead><tr><th>來源 IP</th>'
+        '<th class="num">決策數</th><th class="num">佔比</th></tr></thead><tbody>__PDP_IP_ROWS__</tbody></table></div></div>'
         '<div class="grid2">'
         '<div class="panel"><h2><i></i>按命名空間</h2><div class="tablewrap"><table><thead><tr><th>命名空間</th>'
         '<th class="num">總數</th><th class="num">成功</th><th class="num">失敗</th>'
@@ -1123,6 +1139,17 @@ def render_dashboard(data):
             f'<td class="num">{format_ratio(ratio)}</td>'
             f'<td><div class="bar{" bad" if item.get("deny") else ""}">'
             f'<i style="width:{round(ratio * 100, 1)}%"></i></div></td></tr>'
+        )
+
+    pdp_ip_rows = []
+
+    for ip, count in (pdp.get("by_ip") or {}).items():
+        share = round(count / pdp_total * 100, 1) if pdp_total else 0
+
+        pdp_ip_rows.append(
+            f'<tr><td class="mask">{html.escape(str(ip))}</td>'
+            f'<td class="num">{count}</td>'
+            f'<td class="num">{share}%</td></tr>'
         )
 
     pdp_kv = "".join(
@@ -1167,6 +1194,7 @@ def render_dashboard(data):
         .replace("__BARS__", "".join(bars))
         .replace("__PDP_KV__", pdp_kv)
         .replace("__PDP_ROWS__", "".join(pdp_rows) or '<tr><td colspan="6">暫無資料</td></tr>')
+        .replace("__PDP_IP_ROWS__", "".join(pdp_ip_rows) or '<tr><td colspan="3">暫無資料</td></tr>')
         .replace("__NS_ROWS__", "".join(ns_rows) or '<tr><td colspan="6">暫無資料</td></tr>')
         .replace("__FLOW_ROWS__", "".join(flow_rows) or '<tr><td colspan="7">暫無資料</td></tr>')
     )
