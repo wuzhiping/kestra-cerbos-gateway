@@ -60,6 +60,13 @@ if not GATEWAY_USERS and GATEWAY_USER:
 # Cerbos PDP 地址
 CERBOS_URL = os.getenv("CERBOS_URL", "").rstrip("/")
 
+# Cerbos Admin API（读取审计日志）
+CERBOS_ADMIN_USER = os.getenv("CERBOS_ADMIN_USER", "cerbos")
+CERBOS_ADMIN_PASSWORD = os.getenv("CERBOS_ADMIN_PASSWORD", "cerbosAdmin")
+
+# 只统计与 Kestra 相关的策略
+KESTRA_POLICY_KINDS = {"kestra-mcp", "kestra-api"}
+
 # Kestra 租户（写死 main，OSS 单租户）
 KESTRA_TENANT = "main"
 
@@ -443,6 +450,104 @@ async def fetch_flows():
         return {"total": None, "listed": 0, "by_namespace": {}}
 
 
+async def fetch_cerbos_decisions(window_hours: int):
+    """统计 Cerbos 审计日志中与 Kestra 策略相关的决策"""
+
+    summary = {
+        "total": 0,
+        "allow": 0,
+        "deny": 0,
+        "by_kind": {},
+        "by_principal": {},
+    }
+
+    if not CERBOS_URL:
+        return summary
+
+    url = (
+        f"{CERBOS_URL}/admin/auditlog/list/KIND_DECISION?"
+        + urlencode({"since": f"{window_hours}h"})
+    )
+
+    token = base64.b64encode(
+        f"{CERBOS_ADMIN_USER}:{CERBOS_ADMIN_PASSWORD}".encode()
+    ).decode()
+
+    try:
+        response = await client.get(
+            url,
+            headers={"Authorization": f"Basic {token}"},
+            timeout=httpx.Timeout(30.0, connect=5.0),
+        )
+        response.raise_for_status()
+
+    except Exception:
+        return summary
+
+    kinds = {}
+    principals = {}
+    allow = 0
+    deny = 0
+
+    for line in response.text.splitlines():
+        line = line.strip()
+
+        if not line:
+            continue
+
+        try:
+            payload = json.loads(line)
+        except Exception:
+            continue
+
+        entry = (payload.get("result") or {}).get("decisionLogEntry") or {}
+        check = entry.get("checkResources") or {}
+
+        kind_by_request = {}
+
+        for item in check.get("inputs") or []:
+            resource = item.get("resource") or {}
+            kind = resource.get("kind")
+
+            if kind not in KESTRA_POLICY_KINDS:
+                continue
+
+            request_id = item.get("requestId")
+            kind_by_request[request_id] = kind
+
+            principal = (item.get("principal") or {}).get("id")
+            principals[principal] = principals.get(principal, 0) + 1
+
+            kinds.setdefault(kind, {"total": 0, "allow": 0, "deny": 0})
+            kinds[kind]["total"] += 1
+
+        for item in check.get("outputs") or []:
+            kind = kind_by_request.get(item.get("requestId"))
+
+            if kind is None:
+                continue
+
+            for info in (item.get("actions") or {}).values():
+                effect = (info or {}).get("effect")
+
+                if effect == "EFFECT_ALLOW":
+                    allow += 1
+                    kinds[kind]["allow"] += 1
+                elif effect == "EFFECT_DENY":
+                    deny += 1
+                    kinds[kind]["deny"] += 1
+
+    summary["total"] = sum(item["total"] for item in kinds.values())
+    summary["allow"] = allow
+    summary["deny"] = deny
+    summary["by_kind"] = kinds
+    summary["by_principal"] = dict(
+        sorted(principals.items(), key=lambda kv: kv[1], reverse=True)[:10]
+    )
+
+    return summary
+
+
 def parse_datetime(value):
     if not value:
         return None
@@ -508,18 +613,19 @@ async def collect_stats(window_hours: int, top: int):
     now = time.time()
 
     if _stats_cache["data"] and now - _stats_cache["at"] < STATS_CACHE_TTL:
-        executions, total, fetched_at, flow_inventory = _stats_cache["data"]
+        executions, total, fetched_at, flow_inventory, pdp = _stats_cache["data"]
 
     else:
         started = time.perf_counter()
         executions, total = await fetch_executions()
         flow_inventory = await fetch_flows()
+        pdp = await fetch_cerbos_decisions(window_hours)
         fetched_at = {
             "latency_ms": round((time.perf_counter() - started) * 1000, 1),
             "records": len(executions),
         }
         _stats_cache["at"] = now
-        _stats_cache["data"] = (executions, total, fetched_at, flow_inventory)
+        _stats_cache["data"] = (executions, total, fetched_at, flow_inventory, pdp)
 
     # 以当前时间为终点的 24 小时刻度（24 小时制，整点对齐）
     now = datetime.now(DISPLAY_TZ)
@@ -624,6 +730,7 @@ async def collect_stats(window_hours: int, top: int):
             bucket: summarize(states) for bucket, states in sorted(hourly.items())
         },
         "flow_inventory": flow_inventory,
+        "pdp": pdp,
         "summary": {
             "active_flows": len(active_flows),
             "rate_per_minute": round(window_total / (window_hours * 60), 2) if window_hours else 0,
@@ -838,9 +945,14 @@ def render_dashboard(data):
     hourly = data.get("hourly") or {}
     inventory = data.get("flow_inventory") or {}
     summary = data.get("summary") or {}
+    pdp = data.get("pdp") or {}
 
     healthy = data.get("status") == "ok"
     status_text = "正常" if healthy else "降級"
+
+    pdp_total = pdp.get("total", 0) or 0
+    pdp_decided = (pdp.get("allow", 0) or 0) + (pdp.get("deny", 0) or 0)
+    pdp_allow_ratio = round((pdp.get("allow", 0) or 0) / pdp_decided, 4) if pdp_decided else None
 
     cards = [
         ("blue", "24 小時執行", window.get("total", 0), "視窗內執行總數", 0),
@@ -855,6 +967,8 @@ def render_dashboard(data):
         ("teal", "活躍 Flow", summary.get("active_flows", 0), "窗口內有執行", 0),
         ("cyan", "Flow 總數", inventory.get("total") or 0, "命名空間內 flow 總量", 0),
         ("green", "累計執行", all_time.get("total", 0), "全部歷史", 0),
+        ("violet", "PDP 決策", pdp.get("total", 0), "Kestra 策略決策數", 0),
+        ("amber", "PDP 允許率", format_ratio(pdp_allow_ratio), "允許 ÷ 已決策", None),
     ]
 
     card_html = []
@@ -977,6 +1091,11 @@ def render_dashboard(data):
         '<div class="legend"><span><i style="background:#1fa971"></i>成功</span>'
         '<span><i style="background:#e5484d"></i>失敗</span>'
         '<span><i style="background:#aab6c8"></i>其它</span></div></div></div>'
+        '<div class="panel"><h2><i></i>PDP 決策統計（僅 Kestra 策略）</h2>'
+        '<div class="summary"><div class="kv" style="grid-template-columns:auto auto auto auto">__PDP_KV__</div></div>'
+        '<div class="tablewrap" style="max-height:220px;margin-top:12px"><table><thead><tr><th>策略</th>'
+        '<th class="num">決策數</th><th class="num">允許</th><th class="num">拒絕</th>'
+        '<th class="num">允許率</th><th>佔比</th></tr></thead><tbody>__PDP_ROWS__</tbody></table></div></div>'
         '<div class="grid2">'
         '<div class="panel"><h2><i></i>按命名空間</h2><div class="tablewrap"><table><thead><tr><th>命名空間</th>'
         '<th class="num">總數</th><th class="num">成功</th><th class="num">失敗</th>'
@@ -988,6 +1107,32 @@ def render_dashboard(data):
         "<footer>資料來自網關 /api/v2/health（JSON），頁面每 5 分鐘自動重新整理；"
         "命名空間、Flow 名稱與時間已遮罩處理，僅呈現彙總視圖。</footer>"
         "<script>__JS__</script></body></html>"
+    )
+
+    pdp_rows = []
+
+    for kind, item in sorted((pdp.get("by_kind") or {}).items()):
+        total = item.get("total", 0) or 1
+        ratio = item.get("allow", 0) / total
+
+        pdp_rows.append(
+            f"<tr><td><span class=\"tag\">{html.escape(kind)}</span></td>"
+            f'<td class="num">{item.get("total", 0)}</td>'
+            f'<td class="num">{item.get("allow", 0)}</td>'
+            f'<td class="num">{item.get("deny", 0)}</td>'
+            f'<td class="num">{format_ratio(ratio)}</td>'
+            f'<td><div class="bar{" bad" if item.get("deny") else ""}">'
+            f'<i style="width:{round(ratio * 100, 1)}%"></i></div></td></tr>'
+        )
+
+    pdp_kv = "".join(
+        f"<dt>{html.escape(str(label))}</dt><dd>{html.escape(str(value))}</dd>"
+        for label, value in [
+            ("決策總數", pdp.get("total", 0)),
+            ("允許", pdp.get("allow", 0)),
+            ("拒絕", pdp.get("deny", 0)),
+            ("涉及主體", len(pdp.get("by_principal") or {})),
+        ]
     )
 
     kv_items = [
@@ -1020,6 +1165,8 @@ def render_dashboard(data):
         .replace("__DIST__", dist_bars)
         .replace("__DIST_LEGEND__", dist_legend)
         .replace("__BARS__", "".join(bars))
+        .replace("__PDP_KV__", pdp_kv)
+        .replace("__PDP_ROWS__", "".join(pdp_rows) or '<tr><td colspan="6">暫無資料</td></tr>')
         .replace("__NS_ROWS__", "".join(ns_rows) or '<tr><td colspan="6">暫無資料</td></tr>')
         .replace("__FLOW_ROWS__", "".join(flow_rows) or '<tr><td colspan="7">暫無資料</td></tr>')
     )
@@ -1065,6 +1212,7 @@ async def health(request: Request):
         backend["hourly"] = stats["hourly"]
         backend["flows"] = stats["flow_inventory"]
         backend["summary"] = stats["summary"]
+        backend["pdp"] = stats["pdp"]
 
     except Exception as exc:
         backend.setdefault("detail", type(exc).__name__)
@@ -1093,6 +1241,7 @@ async def health(request: Request):
                 "hourly": stats.get("hourly"),
                 "flow_inventory": stats.get("flow_inventory"),
                 "summary": stats.get("summary"),
+                "pdp": stats.get("pdp"),
             }
         )
 
