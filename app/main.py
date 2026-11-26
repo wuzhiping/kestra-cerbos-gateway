@@ -77,6 +77,9 @@ API_ACTIONS = {
     "DELETE": "delete",
 }
 
+# 展示時區（UTC+8）
+DISPLAY_TZ = timezone(timedelta(hours=8))
+
 # 统计：执行记录拉取与缓存
 STATS_PAGE_SIZE = 1000
 STATS_MAX_PAGES = 20
@@ -501,7 +504,7 @@ async def collect_stats(window_hours: int, top: int):
         _stats_cache["data"] = (executions, total, fetched_at, flow_inventory)
 
     # 以当前时间为终点的 24 小时刻度（24 小时制，整点对齐）
-    now = datetime.now(timezone.utc)
+    now = datetime.now(DISPLAY_TZ)
     end_hour = now.replace(minute=0, second=0, microsecond=0)
     slot_keys = [
         (end_hour - timedelta(hours=index)).strftime("%m-%d %H:00")
@@ -540,14 +543,16 @@ async def collect_stats(window_hours: int, top: int):
 
         key = (namespace, flow_id)
 
-        if started_at.isoformat() > last_run.get(key, ""):
-            last_run[key] = started_at.isoformat()
+        local_time = started_at.astimezone(DISPLAY_TZ).isoformat()
+
+        if local_time > last_run.get(key, ""):
+            last_run[key] = local_time
 
         if started_at >= cutoff:
             window_states[current] += 1
             active_flows.add(key)
 
-            bucket_key = started_at.strftime("%m-%d %H:00")
+            bucket_key = started_at.astimezone(DISPLAY_TZ).strftime("%m-%d %H:00")
 
             if bucket_key in hourly:
                 hourly[bucket_key][current] += 1
@@ -582,11 +587,11 @@ async def collect_stats(window_hours: int, top: int):
     window_total = sum(window_states.values())
 
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(DISPLAY_TZ).isoformat(),
         "window": {
             "hours": window_hours,
             "from": cutoff.isoformat(),
-            "to": datetime.now(timezone.utc).isoformat(),
+            "to": datetime.now(DISPLAY_TZ).isoformat(),
         },
         "executions": {
             "window": summarize(window_states),
