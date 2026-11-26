@@ -648,10 +648,14 @@ main{max-width:1500px;margin:22px auto;padding:0 18px}
 
 .panel{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:16px;overflow:hidden;
   box-shadow:0 2px 8px rgba(20,40,80,.05)}
-.panel h2{margin:0 0 12px;font-size:15px;color:#22304d;display:flex;align-items:center;gap:8px}
+.panel h2{margin:0 0 12px;font-size:15px;color:#22304d;display:flex;align-items:center;gap:8px;white-space:nowrap}
 .panel h2 i{width:8px;height:16px;border-radius:4px;background:linear-gradient(180deg,var(--blue),var(--violet));display:inline-block}
-.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(430px,1fr));gap:16px}
-.grid2 .panel{margin-top:16px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(430px,1fr));gap:16px;align-items:stretch}
+.grid2 .panel{margin-top:16px;display:flex;flex-direction:column;min-height:372px}
+.grid2 .panel h2{flex:0 0 auto}
+.panel.pstate .summary{flex:1 1 auto;align-items:center}
+.panel.pchart .chart{flex:1 1 auto;min-height:170px}
+.panel.pchart .legend{flex:0 0 auto}
 
 .summary{display:flex;gap:22px;align-items:center;flex-wrap:wrap}
 .donut{position:relative;width:132px;height:132px;border-radius:50%;flex:0 0 auto;
@@ -676,7 +680,7 @@ main{max-width:1500px;margin:22px auto;padding:0 18px}
 .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
 
-.chart{display:flex;align-items:flex-end;gap:4px;height:168px;padding:10px 2px 0;overflow:hidden;width:100%}
+.chart{display:flex;align-items:flex-end;gap:4px;height:178px;padding:10px 2px 18px;overflow:hidden;width:100%}
 .chart .col{flex:1 1 0;min-width:0;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;height:100%;cursor:default;overflow:visible}
 .chart .stack{width:100%;max-width:26px;display:flex;flex-direction:column;justify-content:flex-end;height:100%;
   transform-origin:bottom;transform:scaleY(0);animation:grow .7s cubic-bezier(.2,.8,.2,1) forwards}
@@ -686,11 +690,15 @@ main{max-width:1500px;margin:22px auto;padding:0 18px}
 .chart .seg.bad{background:linear-gradient(180deg,#f47874,#e5484d)}
 .chart .seg.other{background:linear-gradient(180deg,#d7dfec,#aab6c8)}
 .chart .col:hover .stack{filter:brightness(1.08) saturate(1.2)}
-.chart small{font-size:9.5px;color:#8b96a8;white-space:nowrap;transform:rotate(-38deg);transform-origin:right center;height:16px;max-width:100%;overflow:hidden;text-overflow:clip}
+.chart small{font-size:10px;color:#8b96a8;white-space:nowrap;height:15px;line-height:15px;transform:none;overflow:visible}
 
 .tablewrap{max-height:360px;overflow:auto;border:1px solid var(--line);border-radius:10px;background:#fff}
-.tablewrap::-webkit-scrollbar{width:6px;height:6px}
-.tablewrap::-webkit-scrollbar-thumb{background:#cdd7e8;border-radius:4px}
+.tablewrap{scrollbar-color:transparent transparent}
+.tablewrap::-webkit-scrollbar{width:6px;height:6px;background:transparent}
+.tablewrap::-webkit-scrollbar-track{background:transparent}
+.tablewrap::-webkit-scrollbar-thumb{background:transparent;border-radius:4px}
+.tablewrap::-webkit-scrollbar-thumb:hover{background:transparent}
+.tablewrap::-webkit-scrollbar-corner{background:transparent}
 table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
 th,td{text-align:left;padding:9px 11px;white-space:nowrap}
 thead th{position:sticky;top:0;z-index:1;color:#5c6a83;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.7px;
@@ -875,7 +883,7 @@ def render_dashboard(data):
             f'<div class="seg other" style="height:{other_h}%"></div>'
             f'<div class="seg bad" style="height:{bad_h}%"></div>'
             f'<div class="seg ok" style="height:{ok_h}%"></div>'
-            f"</div><small>{html.escape(bucket[6:])}</small></div>"
+            f"</div><small>{html.escape(bucket[6:8])}</small></div>"
         )
 
     ns_rows = []
@@ -924,11 +932,11 @@ def render_dashboard(data):
         "<main>"
         '<div class="cards">__CARDS__</div>'
         '<div class="grid2">'
-        '<div class="panel"><h2><i></i>狀態分布與摘要</h2><div class="summary">'
+        '<div class="panel pstate"><h2><i></i>狀態分布與摘要</h2><div class="summary">'
         '<div class="donut" style="--p:__RATIO__"><em>__RATIO__%<small>成功率</small></em></div>'
         '<dl class="kv">__KV__</dl></div>'
         '<div class="distbar">__DIST__</div><div class="legend">__DIST_LEGEND__</div></div>'
-        '<div class="panel"><h2><i></i>每小時執行趨勢</h2>'
+        '<div class="panel pchart"><h2><i></i>每小時執行趨勢</h2>'
         '<div class="chart">__BARS__</div>'
         '<div class="legend"><span><i style="background:#1fa971"></i>成功</span>'
         '<span><i style="background:#e5484d"></i>失敗</span>'
