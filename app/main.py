@@ -265,18 +265,25 @@ def extract_flow_id(request: Request, rest: str, body: bytes):
 
     parts = [p for p in rest.split("/") if p]
 
-    if not parts or parts[0] != "flows":
+    # 去掉可选的租户前缀（如 main/），避免绕过 flow 归属校验
+    while parts and parts[0] == KESTRA_TENANT:
+        parts = parts[1:]
+
+    if "flows" not in parts:
         return None
+
+    index = len(parts) - 1 - parts[::-1].index("flows")
+    after = parts[index + 1:]
 
     # flows/{namespace}/{flowId}[/...]
-    if len(parts) >= 3:
-        return parts[2]
+    if len(after) >= 2:
+        return after[1]
 
     # flows/{namespace}：命名空间级别的列表，不涉及单个 flow
-    if len(parts) == 2:
+    if len(after) == 1:
         return None
 
-    # POST flows：flow id 在请求体里
+    # flows：创建 flow，flow id 在请求体里
     return flow_id_from_body(request, body)
 
 
