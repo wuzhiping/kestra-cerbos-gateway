@@ -808,7 +808,7 @@ def render_dashboard(data):
 
     cards = [
         ("blue", "24 小時執行", window.get("total", 0), "視窗內執行總數", 0),
-        ("green", "成功率", format_ratio(window.get("success_ratio")), "成功 ÷ 失敗", None),
+        ("green", "成功率", format_ratio(window.get("success_ratio")), "成功 ÷ 已完成", None),
         ("rose", "失敗", window.get("failed", 0), "FAILED", 0),
         ("cyan", "進行中", window.get("running", 0), "RUNNING", 0),
         ("amber", "待處理", window.get("pending", 0), "CREATED", 0),
